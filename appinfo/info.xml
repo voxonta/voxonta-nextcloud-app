@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>done_transcription</id>
+    <name>Done Transcription</name>
+    <summary>Transcribes Talk calls per speaker and summarises them</summary>
+    <description><![CDATA[
+Automatic transcription and post-call analysis for Nextcloud Talk.
+
+Every participant is captured on their own audio track, so the transcript shows
+who said what. When a call ends, the transcript is posted to the conversation and
+turned into a summary with decisions and action items.
+
+Participants can stop recording at any time by posting a command in the room
+chat; one-to-one calls are only transcribed once the second person answers.
+
+Requires Talk with a High Performance Backend: call audio is captured through the
+signalling server. The administrator enters the HPB address and its internal
+secret when the app is deployed.
+    ]]></description>
+    <version>0.1.0</version>
+    <licence>agpl</licence>
+    <author>Done</author>
+    <namespace>DoneTranscription</namespace>
+    <category>tools</category>
+    <bugs>https://github.com/devsoftmus/done-transcription-app/issues</bugs>
+    <dependencies>
+        <nextcloud min-version="32" max-version="35"/>
+    </dependencies>
+
+    <external-app>
+        <docker-install>
+            <registry>ghcr.io</registry>
+            <image>devsoftmus/done-transcription-app</image>
+            <image-tag>latest</image-tag>
+        </docker-install>
+        <!-- Filled in by the administrator under "Deploy Options". Read at deploy
+             time; changing them later requires reinstalling the app. -->
+        <environment-variables>
+            <variable>
+                <name>DT_HPB_URL</name>
+                <display-name>Signalling server URL</display-name>
+                <description>WebSocket address of your High Performance Backend, e.g. wss://signal.example.com/spreed</description>
+            </variable>
+            <variable>
+                <name>DT_HPB_INTERNAL_SECRET</name>
+                <display-name>Signalling internal secret</display-name>
+                <description>The internalsecret value from your HPB configuration. Lets the app join calls as an internal client.</description>
+            </variable>
+        </environment-variables>
+    </external-app>
+</info>
