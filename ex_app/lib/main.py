@@ -23,6 +23,8 @@ from fastapi import FastAPI
 from nc_py_api import AsyncNextcloudApp
 from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, run_app, set_handlers
 
+import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,15 +50,13 @@ async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
     """
     try:
         if enabled:
-            await nc.log(LogLvl.WARNING, "done-transcription-app enabled")
-            # TODO(step 4): declarative settings (HPB_URL, HPB_SECRET as
-            #   password/sensitive) — note AppAPI only allows the prebuilt
-            #   sections `ai_integration_team` / `declarative_settings`.
-            # TODO(step 5): nc.ui.top_menu.register(...) — the Vue UI only loads
-            #   behind a top-menu entry.
-            # TODO(step 6): nc.talk.register_bot(...) — trigger + publishing.
+            await settings.register(nc)
+            await nc.log(LogLvl.WARNING, "Done Transcription enabled")
+            # TODO: top-menu entry + Vue UI for the transcript archive.
+            # TODO: Talk bot registration (trigger + publishing to the room).
         else:
-            await nc.log(LogLvl.WARNING, "done-transcription-app disabled")
+            await settings.unregister(nc)
+            await nc.log(LogLvl.WARNING, "Done Transcription disabled")
         return ""
     except Exception as e:  # never crash the lifecycle call
         logger.exception("enabled_handler failed")
