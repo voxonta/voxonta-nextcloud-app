@@ -19,11 +19,12 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from nc_py_api import AsyncNextcloudApp
-from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, run_app, set_handlers
+from fastapi import BackgroundTasks, Depends, FastAPI
+from nc_py_api import AsyncNextcloudApp, talk_bot
+from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, atalk_bot_msg, run_app, set_handlers
 
 import settings
+import talk_bot as bot
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,33 @@ async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
     try:
         if enabled:
             await settings.register(nc)
+            await bot.register(nc, True)
             await nc.log(LogLvl.WARNING, "Done Transcription enabled")
             # TODO: top-menu entry + Vue UI for the transcript archive.
-            # TODO: Talk bot registration (trigger + publishing to the room).
         else:
+            await bot.register(nc, False)
             await settings.unregister(nc)
             await nc.log(LogLvl.WARNING, "Done Transcription disabled")
         return ""
     except Exception as e:  # never crash the lifecycle call
         logger.exception("enabled_handler failed")
         return f"enabled_handler failed: {e}"
+
+
+@APP.post(bot.CALLBACK_URL)
+async def talk_bot_message(
+    background: BackgroundTasks,
+    message: talk_bot.TalkBotMessage = Depends(atalk_bot_msg),
+):
+    """Chat messages from Nextcloud. The signature is verified by the
+    atalk_bot_msg dependency, so an unsigned POST never reaches this body.
+
+    Handling runs in the background and the endpoint answers immediately:
+    Nextcloud is waiting on this request, and an opt-out that takes a round trip
+    to acknowledge feels broken to the person who asked for it.
+    """
+    background.add_task(bot.handle_message, message)
+    return {}
 
 
 if __name__ == "__main__":
