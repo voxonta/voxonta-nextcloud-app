@@ -18,6 +18,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "ex_app", "lib")))
 
+import recording_state  # noqa: E402
 import talk_bot  # noqa: E402
 
 
@@ -30,8 +31,15 @@ def _msg(text: str, object_name: str = "message"):
     )
 
 
-def _run(text: str, object_name: str = "message"):
-    """Drive handle_message with the outgoing reply captured."""
+def _run(text: str, object_name: str = "message", token: str = "room1",
+         reset: bool = True):
+    """Drive handle_message with the outgoing reply captured.
+
+    reset=False keeps whatever decision was already made for this conversation —
+    needed to check that a later message does not silently undo an opt-out.
+    """
+    if reset:
+        recording_state.forget(token)
     sent = []
 
     async def fake_send(message, reply_to, *a, **kw):
@@ -41,7 +49,9 @@ def _run(text: str, object_name: str = "message"):
     original = talk_bot.BOT.send_message
     talk_bot.BOT.send_message = fake_send
     try:
-        asyncio.run(talk_bot.handle_message(_msg(text, object_name)))
+        msg = _msg(text, object_name)
+        msg.conversation_token = token
+        asyncio.run(talk_bot.handle_message(msg))
     finally:
         talk_bot.BOT.send_message = original
     return sent
@@ -85,3 +95,39 @@ def test_ordinary_chatter_is_ignored():
 def test_non_message_objects_are_ignored():
     """Reactions and system events arrive through the same callback."""
     assert not _run("/без-записи", object_name="reaction")
+
+
+def test_opt_out_actually_stops_recording():
+    """The reply is not the point — the capture must see the decision. A bot
+    that answers politely while recording continues is worse than no bot."""
+    _run("/без-записи", token="room-optout")
+    assert recording_state.is_recording("room-optout") is False
+    assert recording_state.opted_out("room-optout") is True
+
+
+def test_resume_turns_recording_back_on():
+    _run("/без-записи", token="room-resume")
+    _run("/запись", token="room-resume")
+    assert recording_state.is_recording("room-resume") is True
+
+
+def test_unknown_conversation_is_recorded_by_default():
+    """No opt-out means transcribe — that is what the admin enabled the app for."""
+    recording_state.forget("room-fresh")
+    assert recording_state.is_recording("room-fresh") is True
+    assert recording_state.opted_out("room-fresh") is False
+
+
+def test_chatter_does_not_change_the_decision():
+    _run("/без-записи", token="room-keep")
+    _run("да, согласен", token="room-keep", reset=False)   # ordinary message
+    assert recording_state.is_recording("room-keep") is False, \
+        "an unrelated message must not undo someone's opt-out"
+
+
+def test_state_is_dropped_when_the_call_ends():
+    """An opt-out applies to the call it was made in. Carrying it into the next
+    call would be a different promise than the app makes."""
+    _run("/без-записи", token="room-ended")
+    recording_state.forget("room-ended")
+    assert recording_state.is_recording("room-ended") is True

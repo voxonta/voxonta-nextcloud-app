@@ -22,6 +22,8 @@ import logging
 from nc_py_api import AsyncNextcloudApp
 from nc_py_api.talk_bot import AsyncTalkBot, TalkBotMessage
 
+import recording_state
+
 logger = logging.getLogger(__name__)
 
 BOT_ID = "done_transcription"
@@ -39,7 +41,7 @@ BOT = AsyncTalkBot(
 )
 
 _STOPPED_REPLY = (
-    "Recording stopped for this call. Nothing said from now on will be "
+    "Recording stopped. Nothing said from now on in this call will be "
     "transcribed. Type /запись to resume."
 )
 _STARTED_REPLY = "Recording resumed for this call."
@@ -89,10 +91,12 @@ async def _set_recording(message: TalkBotMessage, *, recording: bool) -> None:
     """
     token = message.conversation_token
     try:
-        # TODO: propagate to the capture path for this conversation. Until that
-        # is wired, the reply must not claim more than actually happened.
-        logger.info("recording=%s requested in %s by %s",
-                    recording, token, message.actor_display_name)
+        # Applies immediately: the capture checks this before every audio frame.
+        # Pushed to us by Nextcloud, so it also works in one-to-one calls, where
+        # polling the chat over REST does not see the message at all.
+        recording_state.set_recording(
+            token, recording, actor=message.actor_display_name or "",
+        )
         await BOT.send_message(
             _STARTED_REPLY if recording else _STOPPED_REPLY, message,
         )
