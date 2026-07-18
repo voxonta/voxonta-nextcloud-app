@@ -1,5 +1,8 @@
-# ExApp wrapper (this repo). The capture stack (aiortc/websockets/grpc) comes in
-# at step 2, when services/nc-capture moves in from the core repo.
 nc-py-api>=0.30.2          # 0.30+ deprecates sync wrappers — async only
+
+# Call capture: signalling client, per-speaker audio, call monitoring.
+# A published package rather than a copy, so this app and the backend that
+# consumes the transcripts can never drift apart.
+nextcloud-talk-capture>=0.1.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
