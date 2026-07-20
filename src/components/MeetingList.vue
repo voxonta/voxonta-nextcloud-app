@@ -12,7 +12,7 @@
 	Nextcloud users already know from Mail and Talk.
 -->
 <template>
-	<div class="meeting-list">
+	<div ref="scroll" class="meeting-list" @scroll.passive="onScroll">
 		<NcLoadingIcon v-if="loading" class="meeting-list__loading" :size="32" />
 
 		<NcEmptyContent
@@ -55,8 +55,19 @@
 			</NcListItem>
 		</ul>
 
+		<!--
+			More loads as the list is scrolled, not behind a button — the button
+			sat below fifty rows where it was never seen. The spinner is the only
+			cue the reader needs that older calls are on the way; a button that
+			stays visible is kept as the fallback for when the list is too short
+			to scroll at all.
+		-->
+		<div v-if="loadingMore" class="meeting-list__more">
+			<NcLoadingIcon :size="28" />
+		</div>
+
 		<NcButton
-			v-if="hasMore && !loading"
+			v-else-if="hasMore && !loading && !scrollable"
 			class="meeting-list__more"
 			wide
 			@click="loadMore">
@@ -100,9 +111,14 @@ export default {
 		return {
 			meetings: [],
 			loading: true,
+			loadingMore: false,
 			error: '',
 			hasMore: false,
 			nextOffset: 0,
+			// Whether the list is tall enough to scroll. When it is not — a
+			// short list, or a wide window — there is no scroll to trigger the
+			// next page, so the button is shown instead.
+			scrollable: false,
 		}
 	},
 
@@ -129,10 +145,18 @@ export default {
 				console.error('failed to load meetings', e)
 			} finally {
 				this.loading = false
+				this.$nextTick(this.updateScrollable)
 			}
 		},
 
 		async loadMore() {
+			// One page at a time: the scroll handler fires on every scroll
+			// event, and without this guard a fast scroll would ask for the
+			// same next page several times over.
+			if (this.loadingMore || !this.hasMore) {
+				return
+			}
+			this.loadingMore = true
 			try {
 				const page = await fetchMeetings({
 					limit: PAGE,
@@ -143,6 +167,32 @@ export default {
 				this.hasMore = !!page.hasMore
 			} catch (e) {
 				console.error('failed to load older meetings', e)
+			} finally {
+				this.loadingMore = false
+				this.$nextTick(this.updateScrollable)
+			}
+		},
+
+		onScroll() {
+			const el = this.$refs.scroll
+			if (!el) {
+				return
+			}
+			// Fetch before the very bottom, so the next rows are usually there
+			// by the time the reader reaches them.
+			const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 400
+			if (nearBottom) {
+				this.loadMore()
+			}
+		},
+
+		updateScrollable() {
+			const el = this.$refs.scroll
+			this.scrollable = !!el && el.scrollHeight > el.clientHeight
+			// A list that does not fill the pane cannot be scrolled to load
+			// more, so pull the next page until it does or the archive ends.
+			if (this.hasMore && !this.scrollable && !this.loadingMore) {
+				this.loadMore()
 			}
 		},
 
@@ -197,11 +247,21 @@ export default {
 </script>
 
 <style scoped>
+.meeting-list {
+	/* Its own scroll: without a bounded height the pane grows with the list and
+	   the rows past the first screen have nowhere to scroll to — which is why
+	   only the first dozen were reachable. */
+	height: 100%;
+	overflow-y: auto;
+}
+
 .meeting-list__loading {
 	margin-top: 32px;
 }
 
 .meeting-list__more {
+	display: flex;
+	justify-content: center;
 	margin: 16px auto;
 	width: calc(100% - 32px);
 }
