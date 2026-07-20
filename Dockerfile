@@ -52,6 +52,8 @@ COPY --from=builder /usr/local/bin/frpc /usr/local/bin/frpc
 RUN apt-get update && apt-get install -y --no-install-recommends curl procps \
     && rm -rf /var/lib/apt/lists/*
 
+# Built frontend included: the image must be self-contained, so the bundle is
+# built before packaging rather than at container start.
 ADD ex_app/ /ex_app/
 COPY start.sh healthcheck.sh /
 RUN chmod +x /start.sh /healthcheck.sh

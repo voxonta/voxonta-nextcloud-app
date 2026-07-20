@@ -57,9 +57,18 @@ async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
         if enabled:
             await settings.register(nc)
             await bot.register(nc, True)
+            # The archive UI. An ExApp frontend is only ever loaded behind a
+            # top-menu entry — without this registration the bundle is never
+            # requested and the app has no visible surface at all.
+            await nc.ui.resources.set_script(
+                "top_menu", "done_transcription", "js/done_transcription-main")
+            await nc.ui.top_menu.register(
+                "done_transcription", "Meetings", "img/app.svg")
             await nc.log(LogLvl.WARNING, "Done Transcription enabled")
-            # TODO: top-menu entry + Vue UI for the transcript archive.
         else:
+            await nc.ui.top_menu.unregister("done_transcription")
+            await nc.ui.resources.delete_script(
+                "top_menu", "done_transcription", "js/done_transcription-main")
             await bot.register(nc, False)
             await settings.unregister(nc)
             await nc.log(LogLvl.WARNING, "Done Transcription disabled")

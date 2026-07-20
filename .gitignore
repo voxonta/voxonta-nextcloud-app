@@ -5,3 +5,6 @@ venv/
 node_modules/
 .env
 *.log
+
+# Built frontend bundle — produced by `npm run build`, not committed.
+ex_app/js/
