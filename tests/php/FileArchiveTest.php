@@ -333,4 +333,52 @@ class FileArchiveTest extends TestCase {
 
 		$this->assertSame([], $archive->list('alice')['meetings']);
 	}
+
+	public function testSearchMatchesTheFilename(): void {
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - Встреча с Вадимом.md' => self::TRANSCRIPT,
+			'2026-03-06 10-00-00 - Встреча с Дарьей.md' => self::TRANSCRIPT,
+		]);
+
+		$meetings = $archive->list('alice', 50, 0, 'Вадим')['meetings'];
+
+		$this->assertCount(1, $meetings);
+	}
+
+	public function testSearchIsCaseInsensitive(): void {
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - Superset review.md' => self::TRANSCRIPT,
+		]);
+
+		$this->assertCount(1,
+			$archive->list('alice', 50, 0, 'superset')['meetings']);
+	}
+
+	public function testDateRangeExcludesCallsOutsideIt(): void {
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - March call.md' =>
+				str_replace('2026-03-05', '2026-03-05', self::TRANSCRIPT),
+			'2026-07-20 10-00-00 - July call.md' =>
+				str_replace('2026-03-05', '2026-07-20', self::TRANSCRIPT),
+		]);
+
+		// Only March: from 2026-03-01 to 2026-03-31.
+		$from = strtotime('2026-03-01');
+		$to = strtotime('2026-03-31');
+		$meetings = $archive->list('alice', 50, 0, '', $from, $to)['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertStringContainsString('March', $meetings[0]['room_name']);
+	}
+
+	public function testAnOpenEndedRangeIncludesEverythingAfterFrom(): void {
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - Old.md' => self::TRANSCRIPT,
+			'2026-07-20 10-00-00 - New.md' =>
+				str_replace('2026-03-05', '2026-07-20', self::TRANSCRIPT),
+		]);
+
+		$from = strtotime('2026-07-01');
+		$this->assertCount(1, $archive->list('alice', 50, 0, '', $from, 0)['meetings']);
+	}
 }

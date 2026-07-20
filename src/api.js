@@ -33,11 +33,24 @@ async function request(path, { signal } = {}) {
  * @param {object} options paging
  * @param {number} [options.limit] how many to return
  * @param {number} [options.offset] file offset to resume from
+ * @param {string} [options.query] text to match against participants and title
+ * @param {number} [options.from] earliest day, unix seconds (0 = open)
+ * @param {number} [options.to] latest day, unix seconds (0 = open)
  * @param {AbortSignal} [options.signal] to cancel a superseded request
  * @return {Promise<{meetings: object[], nextOffset: number, hasMore: boolean}>}
  */
-export async function fetchMeetings({ limit = 50, offset = 0, signal } = {}) {
+export async function fetchMeetings({ limit = 50, offset = 0, query = '', from = 0, to = 0, signal } = {}) {
 	const params = new URLSearchParams({ limit, offset })
+	// Sent only when set, to keep the common unfiltered request tidy.
+	if (query) {
+		params.set('query', query)
+	}
+	if (from) {
+		params.set('from', from)
+	}
+	if (to) {
+		params.set('to', to)
+	}
 	const data = await request(`/meetings?${params}`, { signal })
 	return {
 		meetings: data.meetings || [],

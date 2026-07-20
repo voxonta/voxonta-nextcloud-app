@@ -113,8 +113,19 @@ class FileArchive {
 	 * @return array{meetings: array<int, array<string, mixed>>,
 	 *               next_offset: int, has_more: bool}
 	 */
-	public function list(string $userId, int $limit = 50, int $offset = 0): array {
+	public function list(string $userId, int $limit = 50, int $offset = 0,
+		string $query = '', int $from = 0, int $to = 0): array {
 		$candidates = $this->transcriptCandidates($userId);
+
+		// Filtering is on the filename, which carries the participants and the
+		// meeting name as well as the date — so a search for a person or a
+		// subject, and a date range, both work without opening a single file.
+		if ($query !== '' || $from !== 0 || $to !== 0) {
+			$candidates = array_values(array_filter(
+				$candidates,
+				fn (array $e) => $this->matchesFilter($e['name'], $query, $from, $to),
+			));
+		}
 		$tHeaders = microtime(true);
 
 		$meetings = [];
@@ -665,6 +676,30 @@ class FileArchive {
 		$name = preg_replace('/\.md$/u', '', $name);
 		$parts = explode(' - ', $name, 2);
 		return trim($parts[1] ?? $parts[0]);
+	}
+
+	/**
+	 * Whether a filename passes the text and date filters.
+	 *
+	 * The filename is "2026-07-20 16-00-00 - Вводная встреча по Superset.md" —
+	 * date, then the participants or the meeting name — so both filters read
+	 * from it. `from`/`to` are day boundaries as unix seconds; either may be 0
+	 * to leave that end open.
+	 */
+	private function matchesFilter(string $name, string $query, int $from, int $to): bool {
+		if ($query !== '' && mb_stripos($name, $query) === false) {
+			return false;
+		}
+		if ($from !== 0 || $to !== 0) {
+			$day = strtotime(substr($name, 0, 10)) ?: 0;
+			if ($from !== 0 && $day < $from) {
+				return false;
+			}
+			if ($to !== 0 && $day > $to) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

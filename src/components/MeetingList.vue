@@ -12,8 +12,30 @@
 	Nextcloud users already know from Mail and Talk.
 -->
 <template>
-	<div ref="scroll" class="meeting-list" @scroll.passive="onScroll">
-		<NcLoadingIcon v-if="loading" class="meeting-list__loading" :size="32" />
+	<div class="meeting-list-wrap">
+		<div class="meeting-list__filters">
+			<NcTextField
+				:value.sync="query"
+				:label="t('done_transcription', 'Search by person or title')"
+				trailing-button-icon="close"
+				:show-trailing-button="query !== ''"
+				@update:value="onFilterChange"
+				@trailing-button-click="clearQuery">
+				<MagnifyIcon :size="18" />
+			</NcTextField>
+
+			<NcSelect
+				v-model="period"
+				class="meeting-list__period"
+				:options="periods"
+				:clearable="false"
+				label="label"
+				:aria-label-combobox="t('done_transcription', 'Period')"
+				@input="onFilterChange" />
+		</div>
+
+		<div ref="scroll" class="meeting-list" @scroll.passive="onScroll">
+			<NcLoadingIcon v-if="loading" class="meeting-list__loading" :size="32" />
 
 		<NcEmptyContent
 			v-else-if="error"
@@ -77,13 +99,14 @@
 			<NcLoadingIcon :size="28" />
 		</div>
 
-		<NcButton
-			v-else-if="hasMore && !loading && !scrollable"
-			class="meeting-list__more"
-			wide
-			@click="loadMore">
-			{{ t('done_transcription', 'Show older meetings') }}
-		</NcButton>
+			<NcButton
+				v-else-if="hasMore && !loading && !scrollable"
+				class="meeting-list__more"
+				wide
+				@click="loadMore">
+				{{ t('done_transcription', 'Show older meetings') }}
+			</NcButton>
+		</div>
 	</div>
 </template>
 
@@ -93,11 +116,18 @@ import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
 import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
 import NcListItem from '@nextcloud/vue/dist/Components/NcListItem.js'
 import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
+import NcSelect from '@nextcloud/vue/dist/Components/NcSelect.js'
+import NcTextField from '@nextcloud/vue/dist/Components/NcTextField.js'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
+import MagnifyIcon from 'vue-material-design-icons/Magnify.vue'
 import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
 import { fetchMeetings } from '../api.js'
 
 const PAGE = 50
+
+// How long to wait after the last keystroke before searching, so a request is
+// not fired on every character.
+const DEBOUNCE_MS = 300
 
 export default {
 	name: 'MeetingList',
@@ -107,7 +137,10 @@ export default {
 		NcEmptyContent,
 		NcListItem,
 		NcLoadingIcon,
+		NcSelect,
+		NcTextField,
 		AlertIcon,
+		MagnifyIcon,
 		MicrophoneIcon,
 	},
 
@@ -130,7 +163,24 @@ export default {
 			// short list, or a wide window — there is no scroll to trigger the
 			// next page, so the button is shown instead.
 			scrollable: false,
+			// Filters.
+			query: '',
+			period: null,
+			debounce: null,
 		}
+	},
+
+	created() {
+		// Built here rather than as a constant so the labels follow the user's
+		// language.
+		this.periods = [
+			{ id: 'all', label: t('done_transcription', 'Any time') },
+			{ id: 'today', label: t('done_transcription', 'Today') },
+			{ id: 'week', label: t('done_transcription', 'Last 7 days') },
+			{ id: 'month', label: t('done_transcription', 'Last 30 days') },
+			{ id: 'year', label: t('done_transcription', 'Last year') },
+		]
+		this.period = this.periods[0]
 	},
 
 	computed: {
@@ -192,11 +242,37 @@ export default {
 	methods: {
 		t,
 
+		// The active filters as request parameters. A period is turned into a
+		// "from" second; "to" is left open so today is always included.
+		filterParams() {
+			const params = { query: this.query.trim() }
+			const days = { today: 1, week: 7, month: 30, year: 365 }[this.period?.id]
+			if (days) {
+				const start = new Date()
+				start.setHours(0, 0, 0, 0)
+				start.setDate(start.getDate() - (days - 1))
+				params.from = Math.floor(start.getTime() / 1000)
+			}
+			return params
+		},
+
+		// Debounced so typing does not fire a request per keystroke. The list
+		// reloads from the top whenever a filter changes.
+		onFilterChange() {
+			clearTimeout(this.debounce)
+			this.debounce = setTimeout(this.load, DEBOUNCE_MS)
+		},
+
+		clearQuery() {
+			this.query = ''
+			this.load()
+		},
+
 		async load() {
 			this.loading = true
 			this.error = ''
 			try {
-				const page = await fetchMeetings({ limit: PAGE })
+				const page = await fetchMeetings({ limit: PAGE, ...this.filterParams() })
 				this.meetings = page.meetings || []
 				this.nextOffset = page.nextOffset || 0
 				this.hasMore = !!page.hasMore
@@ -224,6 +300,7 @@ export default {
 				const page = await fetchMeetings({
 					limit: PAGE,
 					offset: this.nextOffset,
+					...this.filterParams(),
 				})
 				this.meetings = this.meetings.concat(page.meetings || [])
 				this.nextOffset = page.nextOffset || 0
@@ -310,11 +387,28 @@ export default {
 </script>
 
 <style scoped>
-.meeting-list {
-	/* Its own scroll: without a bounded height the pane grows with the list and
-	   the rows past the first screen have nowhere to scroll to — which is why
-	   only the first dozen were reachable. */
+.meeting-list-wrap {
+	display: flex;
+	flex-direction: column;
 	height: 100%;
+}
+
+.meeting-list__filters {
+	display: flex;
+	gap: 8px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.meeting-list__period {
+	min-width: 130px;
+}
+
+.meeting-list {
+	/* Its own scroll under the fixed filters: without a bounded height the pane
+	   grows with the list and the rows past the first screen have nowhere to
+	   scroll to — which is why only the first dozen were reachable. */
+	flex: 1;
 	overflow-y: auto;
 }
 

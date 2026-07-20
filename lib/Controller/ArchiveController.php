@@ -39,7 +39,8 @@ class ArchiveController extends Controller {
 
 	#[NoAdminRequired]
 	#[NoCSRFRequired]
-	public function meetings(int $limit = 50, int $offset = 0): JSONResponse {
+	public function meetings(int $limit = 50, int $offset = 0,
+		string $query = '', int $from = 0, int $to = 0): JSONResponse {
 		if (!$this->identified()) {
 			return $this->unauthorised();
 		}
@@ -48,6 +49,9 @@ class ArchiveController extends Controller {
 			$this->userId,
 			max(1, min($limit, 200)),
 			max(0, $offset),
+			trim($query),
+			max(0, $from),
+			max(0, $to),
 		);
 		return new JSONResponse($page);
 	}
