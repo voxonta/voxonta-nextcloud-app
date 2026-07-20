@@ -18,7 +18,7 @@ Requires Talk with a High Performance Backend: call audio is captured through th
 signalling server. The administrator enters the HPB address and its internal
 secret when the app is deployed.
     ]]></description>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
     <licence>agpl</licence>
     <author>Done</author>
     <namespace>DoneTranscription</namespace>
