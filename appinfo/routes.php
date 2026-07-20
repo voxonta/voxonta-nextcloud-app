@@ -3,19 +3,17 @@
 declare(strict_types=1);
 
 /**
- * The archive endpoints mirror the transcription service's own API, one level
- * removed. The browser never talks to that service directly: the token would
- * have to travel with it, and it grants access to every meeting in the
- * instance.
+ * Two reads per meeting, because that is how they are used: the summary is what
+ * people open, the transcript is what they reach for when the summary left a
+ * question. Fetching them together would load the larger one every time for the
+ * minority of cases that want it.
  */
 return [
 	'routes' => [
 		['name' => 'page#index', 'url' => '/', 'verb' => 'GET'],
 
 		['name' => 'archive#meetings', 'url' => '/api/v1/meetings', 'verb' => 'GET'],
-		['name' => 'archive#meeting', 'url' => '/api/v1/meetings/{sessionId}', 'verb' => 'GET'],
+		['name' => 'archive#summary', 'url' => '/api/v1/meetings/{sessionId}/summary', 'verb' => 'GET'],
 		['name' => 'archive#transcript', 'url' => '/api/v1/meetings/{sessionId}/transcript', 'verb' => 'GET'],
-		['name' => 'archive#analysis', 'url' => '/api/v1/meetings/{sessionId}/analysis', 'verb' => 'GET'],
-		['name' => 'archive#artifact', 'url' => '/api/v1/meetings/{sessionId}/analysis/{name}', 'verb' => 'GET'],
 	],
 ];
