@@ -52,9 +52,6 @@
 				<template #subname>
 					{{ when(meeting) }} · {{ people(meeting) }}
 				</template>
-				<template #indicator>
-					<TextIcon v-if="meeting.has_transcript" :size="16" />
-				</template>
 			</NcListItem>
 		</ul>
 
@@ -75,7 +72,6 @@ import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
 import NcListItem from '@nextcloud/vue/dist/Components/NcListItem.js'
 import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
-import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
 import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
 import { fetchMeetings } from '../api.js'
 
@@ -90,7 +86,6 @@ export default {
 		NcListItem,
 		NcLoadingIcon,
 		AlertIcon,
-		TextIcon,
 		MicrophoneIcon,
 	},
 
@@ -107,6 +102,7 @@ export default {
 			loading: true,
 			error: '',
 			hasMore: false,
+			nextOffset: 0,
 		}
 	},
 
@@ -121,9 +117,10 @@ export default {
 			this.loading = true
 			this.error = ''
 			try {
-				const meetings = await fetchMeetings({ limit: PAGE })
-				this.meetings = meetings
-				this.hasMore = meetings.length === PAGE
+				const page = await fetchMeetings({ limit: PAGE })
+				this.meetings = page.meetings
+				this.nextOffset = page.nextOffset
+				this.hasMore = page.hasMore
 			} catch (e) {
 				// Say what happened rather than showing an empty list — an
 				// empty list reads as "you have no meetings", which is a
@@ -137,12 +134,13 @@ export default {
 
 		async loadMore() {
 			try {
-				const older = await fetchMeetings({
+				const page = await fetchMeetings({
 					limit: PAGE,
-					offset: this.meetings.length,
+					offset: this.nextOffset,
 				})
-				this.meetings = this.meetings.concat(older)
-				this.hasMore = older.length === PAGE
+				this.meetings = this.meetings.concat(page.meetings)
+				this.nextOffset = page.nextOffset
+				this.hasMore = page.hasMore
 			} catch (e) {
 				console.error('failed to load older meetings', e)
 			}

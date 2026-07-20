@@ -151,7 +151,7 @@ class FileArchiveTest extends TestCase {
 	public function testMetadataComesFromTheTranscriptHeader(): void {
 		$archive = $this->archive($this->transcriptFile());
 
-		$meetings = $archive->list('alice');
+		$meetings = $archive->list('alice')['meetings'];
 
 		$this->assertCount(1, $meetings);
 		$this->assertSame('Вадим Куницын', $meetings[0]['room_name']);
@@ -167,13 +167,13 @@ class FileArchiveTest extends TestCase {
 			'Readme.md' => "Some notes\n",
 		]);
 
-		$this->assertSame([], $archive->list('alice'),
+		$this->assertSame([], $archive->list('alice')['meetings'],
 			'the user\'s own markdown must not appear as calls');
 	}
 
 	public function testTheTranscriptIsReadable(): void {
 		$archive = $this->archive($this->transcriptFile());
-		$id = $archive->list('alice')[0]['session_id'];
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
 
 		$this->assertStringContainsString('что решаем',
 			$archive->transcript('alice', $id));
@@ -184,7 +184,7 @@ class FileArchiveTest extends TestCase {
 			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
 			'2026-03-05 14-49-00 - Протокол Вадим Куницын.md' => self::MINUTES,
 		]);
-		$id = $archive->list('alice')[0]['session_id'];
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
 
 		$this->assertStringContainsString('Решили выкатывать',
 			$archive->summary('alice', $id));
@@ -195,7 +195,7 @@ class FileArchiveTest extends TestCase {
 			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
 			'2026-03-06 09-00-00 - Протокол Вадим Куницын.md' => self::MINUTES,
 		]);
-		$id = $archive->list('alice')[0]['session_id'];
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
 
 		$this->assertSame('', $archive->summary('alice', $id),
 			'pairing on anything looser than the timestamp attaches the wrong '
@@ -205,7 +205,7 @@ class FileArchiveTest extends TestCase {
 	public function testACallWithoutMinutesStillOpens(): void {
 		// Transcribed but not analysed is a normal state, not an error.
 		$archive = $this->archive($this->transcriptFile());
-		$id = $archive->list('alice')[0]['session_id'];
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
 
 		$this->assertSame('', $archive->summary('alice', $id));
 	}
@@ -226,7 +226,7 @@ class FileArchiveTest extends TestCase {
 		$searched = null;
 		$archive = $this->archive($this->transcriptFile(), $searched, true);
 
-		$this->assertSame([], $archive->list('alice'));
+		$this->assertSame([], $archive->list('alice')['meetings']);
 	}
 
 	public function testNewestCallsComeFirst(): void {
@@ -236,7 +236,7 @@ class FileArchiveTest extends TestCase {
 			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
 		]);
 
-		$meetings = $archive->list('alice');
+		$meetings = $archive->list('alice')['meetings'];
 
 		$this->assertSame('Вадим Куницын', $meetings[0]['room_name'],
 			'the call people look for is almost always a recent one');
@@ -272,7 +272,7 @@ class FileArchiveTest extends TestCase {
 			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
 		]);
 
-		$meetings = $archive->list('alice');
+		$meetings = $archive->list('alice')['meetings'];
 
 		$this->assertCount(1, $meetings);
 		$this->assertSame('Вадим Куницын', $meetings[0]['room_name']);
@@ -283,7 +283,7 @@ class FileArchiveTest extends TestCase {
 			'2026-07-20 17-00-23 - Вводная встреча по Superset.md' => self::YAML,
 		]);
 
-		$meetings = $archive->list('alice');
+		$meetings = $archive->list('alice')['meetings'];
 
 		$this->assertCount(1, $meetings);
 		$this->assertSame('Вводная встреча по Superset', $meetings[0]['room_name'],
@@ -302,7 +302,7 @@ class FileArchiveTest extends TestCase {
 			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
 		]);
 
-		$this->assertCount(2, $archive->list('alice'));
+		$this->assertCount(2, $archive->list('alice')['meetings']);
 	}
 
 	public function testAYamlFileThatIsNotACallIsIgnored(): void {
@@ -312,7 +312,7 @@ class FileArchiveTest extends TestCase {
 				"---\ntitle: Just notes\ntags:\n  - idea\n---\n\nText\n",
 		]);
 
-		$this->assertSame([], $archive->list('alice'),
+		$this->assertSame([], $archive->list('alice')['meetings'],
 			'a call is recognised by having a time, not by having a header');
 	}
 }

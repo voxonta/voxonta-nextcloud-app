@@ -22,57 +22,54 @@
 			</p>
 		</header>
 
-		<section class="meeting-detail__section">
-			<NcLoadingIcon v-if="loadingSummary" :size="24" />
+		<NcLoadingIcon v-if="loadingSummary" :size="24" class="meeting-detail__loading" />
 
-			<NcEmptyContent
-				v-else-if="summaryError"
-				:name="t('done_transcription', 'Could not load the summary.')">
-				<template #icon>
-					<AlertIcon />
-				</template>
-			</NcEmptyContent>
+		<template v-else>
+			<section v-if="summary" class="meeting-detail__section">
+				<NcRichText :text="summary" :use-extended-markdown="true" />
+			</section>
 
-			<NcRichText v-else :text="summary" :use-extended-markdown="true" />
-		</section>
-
-		<section class="meeting-detail__section">
-			<NcButton
-				v-if="!transcriptShown"
-				:disabled="!meeting.has_transcript"
-				@click="showTranscript">
-				<template #icon>
-					<TextIcon :size="20" />
-				</template>
-				{{ meeting.has_transcript
-					? t('done_transcription', 'Show transcript')
-					: t('done_transcription', 'No transcript for this call') }}
-			</NcButton>
-
-			<template v-else>
-				<h3>{{ t('done_transcription', 'Transcript') }}</h3>
-
-				<NcLoadingIcon v-if="loadingTranscript" :size="24" />
-
-				<NcEmptyContent
-					v-else-if="transcriptError"
-					:name="t('done_transcription', 'Could not load the transcript.')">
+			<section class="meeting-detail__section">
+				<!--
+					When there are minutes, the transcript is the evidence behind
+					them and waits behind a click. When there are none — the
+					analyser has not run — there is nothing to summarise the call
+					with, so the transcript is the content and shows at once.
+				-->
+				<NcButton
+					v-if="summary && !transcriptShown"
+					@click="showTranscript">
 					<template #icon>
-						<AlertIcon />
+						<TextIcon :size="20" />
 					</template>
-				</NcEmptyContent>
+					{{ t('done_transcription', 'Show transcript') }}
+				</NcButton>
 
-				<NcEmptyContent
-					v-else-if="!transcript"
-					:name="t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.')">
-					<template #icon>
-						<MicrophoneOffIcon />
-					</template>
-				</NcEmptyContent>
+				<template v-else>
+					<h3 v-if="summary">{{ t('done_transcription', 'Transcript') }}</h3>
 
-				<NcRichText v-else :text="transcript" :use-extended-markdown="true" />
-			</template>
-		</section>
+					<NcLoadingIcon v-if="loadingTranscript" :size="24" />
+
+					<NcEmptyContent
+						v-else-if="transcriptError"
+						:name="t('done_transcription', 'Could not load the transcript.')">
+						<template #icon>
+							<AlertIcon />
+						</template>
+					</NcEmptyContent>
+
+					<NcEmptyContent
+						v-else-if="!transcript"
+						:name="t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.')">
+						<template #icon>
+							<MicrophoneOffIcon />
+						</template>
+					</NcEmptyContent>
+
+					<NcRichText v-else :text="transcript" :use-extended-markdown="true" />
+				</template>
+			</section>
+		</template>
 	</div>
 </template>
 
@@ -114,7 +111,6 @@ export default {
 			loadingSummary: true,
 			loadingTranscript: false,
 			transcriptShown: false,
-			summaryError: false,
 			transcriptError: false,
 		}
 	},
@@ -167,23 +163,28 @@ export default {
 
 		async loadSummary() {
 			this.loadingSummary = true
-			this.summaryError = false
 			const sessionId = this.meeting.session_id
 
 			try {
 				const text = await fetchSummary(sessionId)
 				// A late answer for a meeting the user already navigated away
 				// from would overwrite what they are reading now.
-				if (this.meeting.session_id === sessionId) {
-					this.summary = text
+				if (this.meeting.session_id !== sessionId) {
+					return
 				}
+				this.summary = text
 			} catch (e) {
-				if (this.meeting.session_id === sessionId) {
-					this.summaryError = true
-				}
 				console.error('failed to load summary', e)
 			} finally {
-				this.loadingSummary = false
+				if (this.meeting.session_id === sessionId) {
+					this.loadingSummary = false
+				}
+			}
+
+			// No minutes: the transcript is the content, so load it now rather
+			// than behind a click nobody would know to press.
+			if (this.meeting.session_id === sessionId && !this.summary) {
+				this.showTranscript()
 			}
 		},
 

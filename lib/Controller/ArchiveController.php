@@ -44,13 +44,12 @@ class ArchiveController extends Controller {
 			return $this->unauthorised();
 		}
 
-		return new JSONResponse([
-			'meetings' => $this->archive->list(
-				$this->userId,
-				max(1, min($limit, 200)),
-				max(0, $offset),
-			),
-		]);
+		$page = $this->archive->list(
+			$this->userId,
+			max(1, min($limit, 200)),
+			max(0, $offset),
+		);
+		return new JSONResponse($page);
 	}
 
 	/**

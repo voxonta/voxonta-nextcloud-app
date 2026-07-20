@@ -61,40 +61,58 @@ class FileArchive {
 	/**
 	 * Calls this person can see, newest first.
 	 *
-	 * @return array<int, array<string, mixed>>
+	 * Paging is over transcripts, but the index pages over *files*, and the two
+	 * differ: some files that match the name pattern turn out on reading not to
+	 * be transcripts. So the offset the caller passes is a file offset, and the
+	 * answer carries the offset to resume from — otherwise a page a few
+	 * non-transcripts short would look like the end of the archive, and the
+	 * older calls behind it would never load.
+	 *
+	 * @return array{meetings: array<int, array<string, mixed>>,
+	 *               next_offset: int, has_more: bool}
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0): array {
-		// Selection, ordering and paging all happen in the file index, which is
-		// what it is for. Doing any of it in PHP means fetching every markdown
-		// file the user can see — thirteen thousand of them on this instance —
-		// to display fifty rows.
-		$files = $this->transcripts($userId, $limit, $offset);
-
 		$meetings = [];
-		foreach ($files as $file) {
-			$meta = $this->transcriptMetadata($file);
-			if ($meta !== null) {
-				$meetings[] = $meta;
+		$scanned = 0;
+		$exhausted = false;
+
+		// Read files in batches until the page is full or the archive runs out.
+		// Selection, ordering and paging are the index's job — doing them in
+		// PHP would mean fetching every markdown file the user can see, and this
+		// instance has thousands.
+		while (count($meetings) < $limit) {
+			$batch = $this->transcripts($userId, $limit, $offset + $scanned);
+			foreach ($batch as $file) {
+				$scanned++;
+				$meta = $this->transcriptMetadata($file);
+				if ($meta !== null) {
+					$meetings[] = $meta;
+					if (count($meetings) >= $limit) {
+						break;
+					}
+				}
+			}
+			if (count($batch) < $limit) {
+				$exhausted = true;
+				break;
 			}
 		}
 
-		// An empty archive and a query that matches nothing look identical from
-		// the outside, and the difference is the whole diagnosis.
-		// Counts only: an empty archive and a query that matches nothing look
-		// identical from the outside, and the difference is the whole
-		// diagnosis. Filenames are not logged — they carry meeting titles and
-		// participants.
 		// Counts only — never names or content: filenames carry meeting titles
-		// and participants. An empty archive and a query that matched nothing
-		// look identical from outside, and that difference is the diagnosis.
-		$this->logger->debug('archive listing for {user}: {found} candidates, '
-			. '{kept} transcripts', [
+		// and participants.
+		$this->logger->debug('archive listing for {user}: {scanned} files from '
+			. 'offset {offset}, {kept} transcripts', [
 				'user' => $userId,
-				'found' => count($files),
+				'scanned' => $scanned,
+				'offset' => $offset,
 				'kept' => count($meetings),
 			]);
 
-		return $meetings;
+		return [
+			'meetings' => $meetings,
+			'next_offset' => $offset + $scanned,
+			'has_more' => !$exhausted,
+		];
 	}
 
 	/**

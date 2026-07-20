@@ -27,8 +27,6 @@
         "No meeting selected": "Встреча не выбрана",
         "Could not load your meetings": "Не удалось загрузить встречи",
         "Show transcript": "Показать расшифровку",
-        "No transcript for this call": "Расшифровки для этого звонка нет",
-        "Could not load the summary.": "Не удалось загрузить итоги.",
         "Please try again.": "Попробуйте ещё раз.",
         "Could not resume recording. Please try again.": "Не удалось возобновить запись. Попробуйте ещё раз.",
         "Could not stop the recording. It may still be running — please ask an administrator.": "Не удалось остановить запись. Возможно, она продолжается — обратитесь к администратору."
