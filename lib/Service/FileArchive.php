@@ -4,11 +4,18 @@ declare(strict_types=1);
 
 namespace OCA\DoneTranscription\Service;
 
+use OCA\DoneTranscription\Service\Search\BinaryOperator;
+use OCA\DoneTranscription\Service\Search\Comparison;
+use OCA\DoneTranscription\Service\Search\Order;
+use OCA\DoneTranscription\Service\Search\Query;
 use OCP\AppFramework\Http;
 use OCP\Files\File;
-use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
+use OCP\Files\Search\ISearchBinaryOperator;
+use OCP\Files\Search\ISearchComparison;
+use OCP\Files\Search\ISearchOrder;
+use OCP\IUserManager;
 use OCP\Share\IManager;
 use OCP\Share\IShare;
 use Psr\Log\LoggerInterface;
@@ -36,6 +43,21 @@ class FileArchive {
 	private const MINUTES_MARKER = 'Протокол';
 
 	/**
+	 * A transcript's filename starts with a date: "2026-03-24 …". The `_`
+	 * matches exactly one character, so this is the shape of a date and not
+	 * merely "starts with 20" — the looser form also matched prompt files named
+	 * 20_extract_knowledge.md.
+	 */
+	private const NAME_PATTERN = '20__-__-__ %';
+
+	/**
+	 * Upper bound on transcripts a search returns. Passing 0 for "no limit"
+	 * makes Nextcloud drop the name filter and return every markdown file, so a
+	 * large finite number is used instead — well past any real archive.
+	 */
+	private const MAX_RESULTS = 100000;
+
+	/**
 	 * Share types a recipient can hold. Numeric rather than the IShare::TYPE_*
 	 * constants because the newer ones (USERROOM, DECK_USER) are absent from
 	 * some versions of the published stubs, while the values are stable and the
@@ -61,6 +83,7 @@ class FileArchive {
 	public function __construct(
 		private IRootFolder $rootFolder,
 		private IManager $shareManager,
+		private IUserManager $userManager,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -183,9 +206,36 @@ class FileArchive {
 		// Talk-conversation shares that never mount. The share manager sees the
 		// shares directly, including personal ones a search can miss. Together
 		// they cover more than either; the file id dedupes the overlap.
+		//
+		// The search filters on the name in the database — "starts with a date,
+		// is not the minutes" — rather than pulling every markdown file the user
+		// can see and sifting it in PHP. For an account with the whole archive
+		// mounted that is the difference between a few hundred rows and thirteen
+		// thousand.
 		try {
 			$userFolder = $this->rootFolder->getUserFolder($userId);
-			foreach ($userFolder->searchByMime('text/markdown') as $node) {
+			$found = $userFolder->search(new Query(
+				// Dated markdown, which is both transcripts and their minutes —
+				// the minutes are kept so summary() can pair them; the listing
+				// filters them out by name. Not filtered here because the same
+				// candidate set answers both.
+				new BinaryOperator(
+					ISearchBinaryOperator::OPERATOR_AND,
+					new Comparison(ISearchComparison::COMPARE_EQUAL,
+						'mimetype', 'text/markdown'),
+					new Comparison(ISearchComparison::COMPARE_LIKE,
+						'name', self::NAME_PATTERN),
+				),
+				// A large finite limit, not 0: passing 0 makes Nextcloud's search
+				// return every markdown file with the name filter dropped, which
+				// is exactly the load this method exists to avoid. The cap is far
+				// past any real archive.
+				self::MAX_RESULTS,
+				0,
+				[new Order(ISearchOrder::DIRECTION_DESCENDING, 'name')],
+				$this->userManager->get($userId),
+			));
+			foreach ($found as $node) {
 				if ($node instanceof File) {
 					$entries[$node->getId()] ??= [
 						'name' => $node->getName(),

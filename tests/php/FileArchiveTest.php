@@ -10,6 +10,9 @@ use OCP\AppFramework\Http;
 use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
+use OCP\Files\Search\ISearchQuery;
+use OCP\IUser;
+use OCP\IUserManager;
 use OCP\Share\IManager;
 use OCP\Share\IShare;
 use PHPUnit\Framework\TestCase;
@@ -57,12 +60,18 @@ class FileArchiveTest extends TestCase {
 		}
 
 		$userFolder = $this->createMock(Folder::class);
-		$userFolder->method('searchByMime')->willReturnCallback(
+		// Stand in for the indexed search: apply the same name filter the
+		// database would, so the tests exercise the query actually built —
+		// starts with a date, is not the minutes.
+		$userFolder->method('search')->willReturnCallback(
 			function () use ($nodes, $lookupThrows) {
 				if ($lookupThrows) {
 					throw new \RuntimeException('storage down');
 				}
-				return $nodes;
+				// The database filters to dated markdown — transcripts and
+				// their minutes both; the listing and summary sort them out.
+				return array_values(array_filter($nodes, static fn (File $f) =>
+					preg_match('/^20\d\d-\d\d-\d\d /u', $f->getName()) === 1));
 			});
 		$root = $this->createMock(IRootFolder::class);
 		$root->method('getUserFolder')->willReturnCallback(
@@ -81,7 +90,10 @@ class FileArchiveTest extends TestCase {
 				return $shares;
 			});
 
-		return new FileArchive($root, $shareManager,
+		$users = $this->createMock(IUserManager::class);
+		$users->method('get')->willReturn($this->createMock(IUser::class));
+
+		return new FileArchive($root, $shareManager, $users,
 			$this->createMock(LoggerInterface::class));
 	}
 
