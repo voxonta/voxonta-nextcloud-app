@@ -11,11 +11,12 @@
   },
   "dependencies": {
     "@nextcloud/vue": "^8.11.0",
-    "vue": "^2.7.16"
+    "vue": "^2.7.16",
+    "vue-material-design-icons": "^5.3.1"
   },
   "devDependencies": {
-    "@nextcloud/webpack-vue-config": "^6.0.1",
     "@babel/core": "^7.22.9",
+    "@nextcloud/webpack-vue-config": "^6.0.1",
     "babel-loader": "^10.0.0",
     "css-loader": "^7.1.1",
     "node-polyfill-webpack-plugin": "4.0.0",

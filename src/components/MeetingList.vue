@@ -1,68 +1,82 @@
 <!--
-	The list of your meetings.
+	The list of meetings.
 
 	Two things this screen has to get right. It must be obvious which call is
-	which — people recognise a meeting by when it happened and who was in it, not
-	by a room name that is often "Standup" for the hundredth time. And it must say
-	plainly when there is nothing to show and why, because "empty" here has three
-	very different causes: the app was just installed, you were not in any calls,
-	or something is broken.
+	which — people recognise a meeting by when it happened and who was in it,
+	not by a room name that is "Standup" for the hundredth time. And it must say
+	plainly when there is nothing to show and why, because "empty" here has
+	three very different causes: the app was just installed, you were in no
+	calls, or something is broken.
+
+	NcListItem carries the selection state, keyboard handling and the layout
+	Nextcloud users already know from Mail and Talk.
 -->
 <template>
 	<div class="meeting-list">
-		<div v-if="loading" class="meeting-list__state">
-			<span class="icon-loading-small" /> {{ t('done_transcription', 'Loading meetings…') }}
-		</div>
+		<NcLoadingIcon v-if="loading" class="meeting-list__loading" :size="32" />
 
-		<div v-else-if="error" class="meeting-list__state meeting-list__state--error">
-			<p>{{ error }}</p>
-			<button @click="load">{{ t('done_transcription', 'Try again') }}</button>
-		</div>
+		<NcEmptyContent
+			v-else-if="error"
+			:name="t('done_transcription', 'Could not load your meetings')"
+			:description="error">
+			<template #icon>
+				<AlertIcon />
+			</template>
+			<template #action>
+				<NcButton @click="load">
+					{{ t('done_transcription', 'Try again') }}
+				</NcButton>
+			</template>
+		</NcEmptyContent>
 
-		<div v-else-if="!meetings.length" class="meeting-list__state">
-			<p>{{ t('done_transcription', 'No transcribed meetings yet.') }}</p>
-			<p class="meeting-list__hint">
-				{{ t('done_transcription', 'Calls you take part in appear here once they end and the transcript is ready.') }}
-			</p>
-		</div>
+		<NcEmptyContent
+			v-else-if="!meetings.length"
+			:name="t('done_transcription', 'No transcribed meetings yet.')"
+			:description="t('done_transcription', 'Calls you take part in appear here once they end and the transcript is ready.')">
+			<template #icon>
+				<MicrophoneIcon />
+			</template>
+		</NcEmptyContent>
 
-		<ul v-else class="meeting-list__items">
-			<li
+		<ul v-else>
+			<NcListItem
 				v-for="meeting in meetings"
 				:key="meeting.session_id"
-				class="meeting-list__item"
-				:class="{ 'meeting-list__item--selected': meeting.session_id === selectedId }"
-				tabindex="0"
-				@click="$emit('select', meeting)"
-				@keyup.enter="$emit('select', meeting)">
-				<div class="meeting-list__row">
-					<span class="meeting-list__name">{{ meeting.room_name || t('done_transcription', 'Untitled call') }}</span>
-					<span class="meeting-list__duration">{{ duration(meeting) }}</span>
-				</div>
-				<div class="meeting-list__row meeting-list__row--secondary">
-					<span>{{ when(meeting) }}</span>
-					<span>{{ people(meeting) }}</span>
-				</div>
-				<span
-					v-if="meeting.analysis_status === 'ready'"
-					class="meeting-list__badge">{{ t('done_transcription', 'Summary') }}</span>
-				<span
-					v-else-if="meeting.analysis_status === 'running'"
-					class="meeting-list__badge meeting-list__badge--muted">{{ t('done_transcription', 'Analysing') }}…</span>
-			</li>
+				:name="meeting.room_name || t('done_transcription', 'Untitled call')"
+				:active="meeting.session_id === selectedId"
+				:details="duration(meeting)"
+				@click="$emit('select', meeting)">
+				<template #icon>
+					<MicrophoneIcon :size="32" />
+				</template>
+				<template #subname>
+					{{ when(meeting) }} · {{ people(meeting) }}
+				</template>
+				<template #indicator>
+					<CheckIcon v-if="meeting.analysis_status === 'ready'" :size="16" />
+				</template>
+			</NcListItem>
 		</ul>
 
-		<button
+		<NcButton
 			v-if="hasMore && !loading"
 			class="meeting-list__more"
+			wide
 			@click="loadMore">
 			{{ t('done_transcription', 'Show older meetings') }}
-		</button>
+		</NcButton>
 	</div>
 </template>
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
+import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
+import NcListItem from '@nextcloud/vue/dist/Components/NcListItem.js'
+import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
+import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
+import CheckIcon from 'vue-material-design-icons/CheckCircle.vue'
+import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
 import { fetchMeetings } from '../api.js'
 
 const PAGE = 50
@@ -70,10 +84,24 @@ const PAGE = 50
 export default {
 	name: 'MeetingList',
 
+	components: {
+		NcButton,
+		NcEmptyContent,
+		NcListItem,
+		NcLoadingIcon,
+		AlertIcon,
+		CheckIcon,
+		MicrophoneIcon,
+	},
+
 	props: {
 		selectedId: {
 			type: String,
 			default: '',
+		},
+		scope: {
+			type: String,
+			default: 'mine',
 		},
 	},
 
@@ -91,18 +119,23 @@ export default {
 	},
 
 	methods: {
+		t,
+
 		async load() {
 			this.loading = true
 			this.error = ''
 			try {
-				const meetings = await fetchMeetings({ limit: PAGE })
-				this.meetings = meetings
-				this.hasMore = meetings.length === PAGE
+				const data = await fetchMeetings({ limit: PAGE, scope: this.scope })
+				this.meetings = data.meetings
+				this.hasMore = data.meetings.length === PAGE
+				// Only the server can answer this, and the answer decides
+				// whether the wider view is offered at all.
+				this.$emit('access', data.canSeeEverything)
 			} catch (e) {
 				// Say what happened rather than showing an empty list — an
 				// empty list reads as "you have no meetings", which is a
 				// different and misleading statement.
-				this.error = t('done_transcription', 'Could not load your meetings. The transcription service may be unavailable.')
+				this.error = t('done_transcription', 'The transcription service may be unavailable.')
 				console.error('failed to load meetings', e)
 			} finally {
 				this.loading = false
@@ -111,12 +144,13 @@ export default {
 
 		async loadMore() {
 			try {
-				const older = await fetchMeetings({
+				const data = await fetchMeetings({
 					limit: PAGE,
 					offset: this.meetings.length,
+					scope: this.scope,
 				})
-				this.meetings = this.meetings.concat(older)
-				this.hasMore = older.length === PAGE
+				this.meetings = this.meetings.concat(data.meetings)
+				this.hasMore = data.meetings.length === PAGE
 			} catch (e) {
 				console.error('failed to load older meetings', e)
 			}
@@ -160,7 +194,7 @@ export default {
 				return ''
 			}
 			// Recognising a call is mostly "who was in it", so show names, and
-			// only fall back to a count when the list is long.
+			// fall back to a count only when the list is long.
 			return names.length <= 3
 				? names.join(', ')
 				: t('done_transcription', '{names} and {count} others', {
@@ -173,79 +207,12 @@ export default {
 </script>
 
 <style scoped>
-.meeting-list__state {
-	padding: 24px;
-	color: var(--color-text-maxcontrast);
-	text-align: center;
-}
-
-.meeting-list__state--error {
-	color: var(--color-error);
-}
-
-.meeting-list__hint {
-	font-size: 0.9em;
-	margin-top: 8px;
-}
-
-.meeting-list__items {
-	list-style: none;
-	margin: 0;
-	padding: 0;
-}
-
-.meeting-list__item {
-	padding: 12px 16px;
-	border-bottom: 1px solid var(--color-border);
-	cursor: pointer;
-}
-
-.meeting-list__item:hover,
-.meeting-list__item:focus {
-	background-color: var(--color-background-hover);
-}
-
-.meeting-list__item--selected {
-	background-color: var(--color-primary-light);
-}
-
-.meeting-list__row {
-	display: flex;
-	justify-content: space-between;
-	gap: 12px;
-}
-
-.meeting-list__row--secondary {
-	margin-top: 4px;
-	font-size: 0.85em;
-	color: var(--color-text-maxcontrast);
-}
-
-.meeting-list__name {
-	font-weight: 600;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.meeting-list__badge {
-	display: inline-block;
-	margin-top: 6px;
-	padding: 1px 8px;
-	border-radius: var(--border-radius-pill);
-	background-color: var(--color-primary-element);
-	color: var(--color-primary-element-text);
-	font-size: 0.75em;
-}
-
-.meeting-list__badge--muted {
-	background-color: var(--color-background-dark);
-	color: var(--color-text-maxcontrast);
+.meeting-list__loading {
+	margin-top: 32px;
 }
 
 .meeting-list__more {
-	display: block;
+	margin: 16px auto;
 	width: calc(100% - 32px);
-	margin: 16px;
 }
 </style>

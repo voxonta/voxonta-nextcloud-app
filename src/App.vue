@@ -1,108 +1,118 @@
 <!--
-	Two panes: your meetings on the left, the selected one on the right.
+	The archive, in Nextcloud's own application frame.
 
-	On a phone there is only room for one, so the list gives way to the meeting
-	and a back link returns to it — the same shape Nextcloud's own apps use, so
-	it needs no explanation.
+	NcContent / NcAppNavigation / NcAppContent are what every shipped app uses,
+	and using them is not only about looking familiar: the responsive behaviour,
+	the navigation toggle on narrow screens, focus handling and theming all come
+	with them. Hand-rolled panels drift from the platform on every Nextcloud
+	release; these follow it.
+
+	"All meetings" appears only for accounts allowed to see it. Offering it to
+	everyone would mean a menu entry whose only answer is a refusal.
 -->
 <template>
-	<div class="archive" :class="{ 'archive--detail-open': selected }">
-		<aside class="archive__list">
-			<h1 class="archive__title">{{ t('done_transcription', 'Meetings') }}</h1>
-			<MeetingList :selected-id="selected ? selected.session_id : ''" @select="open" />
-		</aside>
+	<NcContent app-name="done_transcription">
+		<NcAppNavigation>
+			<template #list>
+				<NcAppNavigationItem
+					:name="t('done_transcription', 'My meetings')"
+					:active="scope === 'mine'"
+					@click="select('mine')">
+					<template #icon>
+						<AccountIcon :size="20" />
+					</template>
+				</NcAppNavigationItem>
 
-		<main class="archive__detail">
-			<button v-if="selected" class="archive__back" @click="selected = null">
-				← {{ t('done_transcription', 'Meetings') }}
-			</button>
+				<NcAppNavigationItem
+					v-if="canSeeEverything"
+					:name="t('done_transcription', 'All meetings')"
+					:active="scope === 'all'"
+					@click="select('all')">
+					<template #icon>
+						<ArchiveIcon :size="20" />
+					</template>
+				</NcAppNavigationItem>
+			</template>
+		</NcAppNavigation>
+
+		<NcAppContent :show-details="!!selected" @update:showDetails="selected = null">
+			<template #list>
+				<MeetingList
+					:key="scope"
+					:scope="scope"
+					:selected-id="selected ? selected.session_id : ''"
+					@select="open"
+					@access="canSeeEverything = $event" />
+			</template>
 
 			<MeetingDetail v-if="selected" :meeting="selected" />
 
-			<p v-else class="archive__placeholder">
-				{{ t('done_transcription', 'Select a meeting to read its transcript.') }}
-			</p>
-		</main>
-	</div>
+			<NcEmptyContent
+				v-else
+				:name="t('done_transcription', 'No meeting selected')"
+				:description="t('done_transcription', 'Select a meeting to read its transcript.')">
+				<template #icon>
+					<MicrophoneIcon />
+				</template>
+			</NcEmptyContent>
+		</NcAppContent>
+	</NcContent>
 </template>
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import NcAppContent from '@nextcloud/vue/dist/Components/NcAppContent.js'
+import NcAppNavigation from '@nextcloud/vue/dist/Components/NcAppNavigation.js'
+import NcAppNavigationItem from '@nextcloud/vue/dist/Components/NcAppNavigationItem.js'
+import NcContent from '@nextcloud/vue/dist/Components/NcContent.js'
+import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
+import AccountIcon from 'vue-material-design-icons/Account.vue'
+import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
+import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
 import MeetingDetail from './components/MeetingDetail.vue'
 import MeetingList from './components/MeetingList.vue'
 
 export default {
 	name: 'App',
-	components: { MeetingDetail, MeetingList },
+
+	components: {
+		NcAppContent,
+		NcAppNavigation,
+		NcAppNavigationItem,
+		NcContent,
+		NcEmptyContent,
+		AccountIcon,
+		ArchiveIcon,
+		MicrophoneIcon,
+		MeetingDetail,
+		MeetingList,
+	},
 
 	data() {
-		return { selected: null }
+		return {
+			selected: null,
+			scope: 'mine',
+			// Told by the server on the first listing. Assumed false until then,
+			// so the wider view is never offered to someone who cannot use it.
+			canSeeEverything: false,
+		}
 	},
 
 	methods: {
+		t,
+
+		select(scope) {
+			if (this.scope === scope) {
+				return
+			}
+			this.scope = scope
+			// The open meeting may not be present in the view we switch to.
+			this.selected = null
+		},
+
 		open(meeting) {
 			this.selected = meeting
 		},
 	},
 }
 </script>
-
-<style scoped>
-.archive {
-	display: flex;
-	height: 100%;
-	width: 100%;
-}
-
-.archive__list {
-	width: 340px;
-	flex-shrink: 0;
-	border-inline-end: 1px solid var(--color-border);
-	overflow-y: auto;
-}
-
-.archive__title {
-	padding: 16px;
-	margin: 0;
-	font-size: 1.2em;
-}
-
-.archive__detail {
-	flex: 1;
-	overflow-y: auto;
-}
-
-.archive__placeholder {
-	padding: 32px;
-	color: var(--color-text-maxcontrast);
-	text-align: center;
-}
-
-.archive__back {
-	display: none;
-	margin: 12px 0 0 12px;
-}
-
-/* One pane at a time on narrow screens. */
-@media (max-width: 768px) {
-	.archive__list {
-		width: 100%;
-	}
-
-	.archive__detail {
-		display: none;
-	}
-
-	.archive--detail-open .archive__list {
-		display: none;
-	}
-
-	.archive--detail-open .archive__detail {
-		display: block;
-	}
-
-	.archive__back {
-		display: inline-block;
-	}
-}
-</style>

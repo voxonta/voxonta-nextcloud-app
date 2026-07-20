@@ -41,6 +41,21 @@ def _js_sources() -> set[str]:
     return found
 
 
+def _info_xml_sources() -> set[str]:
+    """Strings Nextcloud translates from info.xml.
+
+    The navigation entry's name never appears in a t() call — Nextcloud looks it
+    up in the app's own translations — so without this the menu label reads as a
+    dead entry and gets deleted, taking the translated menu name with it.
+    """
+    import xml.etree.ElementTree as ET
+    root = ET.parse(os.path.join(ROOT, "appinfo", "info.xml")).getroot()
+    found = {root.findtext("name", "").strip()}
+    for nav in root.findall("./navigations/navigation"):
+        found.add((nav.findtext("name") or "").strip())
+    return {f for f in found if f}
+
+
 def _php_sources() -> set[str]:
     """Strings passed through the app's own translation helpers."""
     pattern = re.compile(r"(?:\$this->l|\$this->l10n->t)\(\s*'((?:[^'\\]|\\.)*)'")
@@ -71,7 +86,7 @@ def test_every_server_string_is_translated():
 def test_no_stale_translations():
     """An entry for a string nothing uses is usually the leftover half of a
     reworded message."""
-    used = _js_sources() | _php_sources()
+    used = _js_sources() | _php_sources() | _info_xml_sources()
     ru = _ru()
     # Proper nouns deliberately identical in both languages are not dead.
     unused = sorted(k for k, v in ru.items() if k not in used and v != k)

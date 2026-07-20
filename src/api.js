@@ -32,16 +32,24 @@ async function request(path, { signal } = {}) {
  * @param {object} options filtering and paging
  * @param {number} [options.limit] how many to return
  * @param {number} [options.offset] where to start
+ * @param {string} [options.scope] 'mine' or 'all' for the whole archive
  * @param {AbortSignal} [options.signal] to cancel a superseded search
- * @return {Promise<object[]>}
+ * @return {Promise<{meetings: object[], canSeeEverything: boolean}>}
  */
-export async function fetchMeetings({ limit = 50, offset = 0, signal } = {}) {
+export async function fetchMeetings({ limit = 50, offset = 0, scope = 'mine', signal } = {}) {
 	// No user parameter: the server derives it from the session and ignores
 	// anything sent from here, so offering it would only invite the idea that
 	// asking for someone else's meetings is a supported thing to do.
-	const params = new URLSearchParams({ limit, offset })
+	//
+	// scope=all is a request for the whole archive, which the server grants
+	// only to accounts allowed it — asking without the right returns your own
+	// meetings rather than an error.
+	const params = new URLSearchParams({ limit, offset, scope })
 	const data = await request(`/meetings?${params}`, { signal })
-	return data.meetings || []
+	return {
+		meetings: data.meetings || [],
+		canSeeEverything: !!data.can_see_everything,
+	}
 }
 
 /**

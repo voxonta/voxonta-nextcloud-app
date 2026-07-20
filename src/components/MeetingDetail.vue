@@ -30,7 +30,7 @@
 		<section v-else-if="analysisState === 'running'" class="meeting-detail__section">
 			<h3>{{ t('done_transcription', 'Summary') }}</h3>
 			<p class="meeting-detail__note">
-				<span class="icon-loading-small" />
+				<NcLoadingIcon :size="16" class="meeting-detail__inline-icon" />
 				{{ t('done_transcription', 'The summary is being prepared. The transcript below is complete.') }}
 			</p>
 		</section>
@@ -38,17 +38,23 @@
 		<section class="meeting-detail__section">
 			<h3>{{ t('done_transcription', 'Transcript') }}</h3>
 
-			<p v-if="loadingTranscript" class="meeting-detail__note">
-				<span class="icon-loading-small" /> {{ t('done_transcription', 'Loading…') }}
-			</p>
+			<NcLoadingIcon v-if="loadingTranscript" :size="24" />
 
-			<p v-else-if="transcriptError" class="meeting-detail__note meeting-detail__note--error">
-				{{ transcriptError }}
-			</p>
+			<NcEmptyContent
+				v-else-if="transcriptError"
+				:name="t('done_transcription', 'Could not load the transcript.')">
+				<template #icon>
+					<AlertIcon />
+				</template>
+			</NcEmptyContent>
 
-			<p v-else-if="!blocks.length" class="meeting-detail__note">
-				{{ t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.') }}
-			</p>
+			<NcEmptyContent
+				v-else-if="!blocks.length"
+				:name="t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.')">
+				<template #icon>
+					<MicrophoneOffIcon />
+				</template>
+			</NcEmptyContent>
 
 			<div v-else class="meeting-detail__transcript">
 				<div v-for="(block, index) in blocks" :key="index" class="meeting-detail__block">
@@ -65,10 +71,21 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
+import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
+import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
+import MicrophoneOffIcon from 'vue-material-design-icons/MicrophoneOff.vue'
 import { fetchAnalysis, fetchArtifact, fetchTranscript } from '../api.js'
 
 export default {
 	name: 'MeetingDetail',
+
+	components: {
+		NcEmptyContent,
+		NcLoadingIcon,
+		AlertIcon,
+		MicrophoneOffIcon,
+	},
 
 	props: {
 		meeting: {
@@ -229,6 +246,11 @@ export default {
 
 .meeting-detail__section {
 	margin-top: 24px;
+}
+
+.meeting-detail__inline-icon {
+	display: inline-block;
+	vertical-align: middle;
 }
 
 .meeting-detail__note {
