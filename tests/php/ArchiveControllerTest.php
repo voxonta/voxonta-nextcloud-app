@@ -53,6 +53,14 @@ class ArchiveControllerTest extends TestCase {
 				if (str_ends_with($path, '/transcript')) {
 					return ['segments' => [['text' => 'secret']]];
 				}
+				if (str_ends_with($path, '/analysis')) {
+					return ['artifacts' => [
+						'01_Executive_Summary.md',
+						'04_Meeting_Dynamics.md',
+						'05_Speaker_Others.md',
+						'08_Validation_Report.md',
+					]];
+				}
 				return $meeting;
 			});
 		return $backend;
@@ -208,5 +216,30 @@ class ArchiveControllerTest extends TestCase {
 
 		$auditor = $this->controller($this->backend(), 'auditor', true)->meetings();
 		$this->assertTrue($auditor->getData()['can_see_everything']);
+	}
+
+	public function testOnlyTheSummaryIsOfferedToParticipants(): void {
+		$backend = $this->backend(['session_id' => 's1', 'participants' => ['alice']]);
+		$response = $this->controller($backend, 'alice')->analysis('s1');
+
+		$this->assertSame(['01_Executive_Summary.md'], $response->getData()['artifacts'],
+			'speaker dynamics and the validation report are for us, not for the room');
+	}
+
+	public function testAnArtefactOutsideTheAllowlistCannotBeFetchedByName(): void {
+		$backend = $this->backend(['session_id' => 's1', 'participants' => ['alice']]);
+		$response = $this->controller($backend, 'alice')
+			->artifact('s1', '08_Validation_Report.md');
+
+		$this->assertSame(Http::STATUS_NOT_FOUND, $response->getStatus(),
+			'filtering the listing alone leaves every artefact one request away');
+	}
+
+	public function testTheSummaryItselfStaysReadable(): void {
+		$backend = $this->backend(['session_id' => 's1', 'participants' => ['alice']]);
+		$response = $this->controller($backend, 'alice')
+			->artifact('s1', '01_Executive_Summary.md');
+
+		$this->assertSame(Http::STATUS_OK, $response->getStatus());
 	}
 }

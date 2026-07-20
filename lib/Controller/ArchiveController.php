@@ -25,6 +25,24 @@ use Psr\Log\LoggerInterface;
  * the browser is a request to read someone else's calls.
  */
 class ArchiveController extends Controller {
+	/**
+	 * The analysis artefacts a participant may read.
+	 *
+	 * An allowlist, not a blocklist, and that is the point: the analyser
+	 * produces a dozen artefacts, several of which are about the people in the
+	 * call rather than about what was decided — speaker dynamics, a validation
+	 * report, per-speaker notes. Those exist for us, not for the room.
+	 *
+	 * With a blocklist, every new artefact the analyser learns to write would be
+	 * published to participants by default, and nobody would notice until it
+	 * appeared on someone's screen. This way a new artefact is invisible until
+	 * somebody decides otherwise.
+	 */
+	private const READABLE_ARTIFACTS = [
+		'01_Executive_Summary.md',
+		'01_Summary.md',
+	];
+
 	public function __construct(
 		string $appName,
 		IRequest $request,
@@ -99,12 +117,33 @@ class ArchiveController extends Controller {
 	#[NoAdminRequired]
 	#[NoCSRFRequired]
 	public function analysis(string $sessionId): JSONResponse {
-		return $this->guarded($sessionId, '/analysis');
+		try {
+			$this->meetingIfAttended($sessionId);
+			$data = $this->backend->get(
+				'/v1/meetings/' . rawurlencode($sessionId) . '/analysis');
+		} catch (BackendException $e) {
+			return $this->failure($e);
+		}
+
+		$names = array_values(array_filter(
+			$data['artifacts'] ?? [],
+			static fn ($name) => in_array($name, self::READABLE_ARTIFACTS, true),
+		));
+		return new JSONResponse(['artifacts' => $names]);
 	}
 
 	#[NoAdminRequired]
 	#[NoCSRFRequired]
 	public function artifact(string $sessionId, string $name): JSONResponse {
+		// Checked here too, not only when listing: the list is a suggestion,
+		// this is the door. Fetching by name is one request away for anyone
+		// who knows what the analyser writes.
+		if (!in_array($name, self::READABLE_ARTIFACTS, true)) {
+			$this->logger->info('refused artefact {name}, which is not readable '
+				. 'by participants', ['name' => $name]);
+			return new JSONResponse(['message' => 'not found'],
+				Http::STATUS_NOT_FOUND);
+		}
 		return $this->guarded($sessionId, '/analysis/' . rawurlencode($name));
 	}
 
