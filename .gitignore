@@ -3,3 +3,4 @@ vendor/
 js/
 tests/php/.phpunit.cache/
 __pycache__/
+build/
