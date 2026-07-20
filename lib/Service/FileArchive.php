@@ -5,10 +5,18 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Service;
 
 use OCP\AppFramework\Http;
+use OCA\DoneTranscription\Service\Search\BinaryOperator;
+use OCA\DoneTranscription\Service\Search\Comparison;
+use OCA\DoneTranscription\Service\Search\Order;
+use OCA\DoneTranscription\Service\Search\Query;
 use OCP\Files\File;
-use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
+use OCP\Files\Search\ISearchBinaryOperator;
+use OCP\Files\Search\ISearchComparison;
+use OCP\Files\Search\ISearchOperator;
+use OCP\Files\Search\ISearchOrder;
+use OCP\IUserManager;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -33,18 +41,12 @@ class FileArchive {
 	private const HEADER = '# Транскрипция:';
 	private const MINUTES_MARKER = 'Протокол';
 
-	/**
-	 * Where the service keeps them, for the account it writes as.
-	 *
-	 * Listing a known folder is one storage operation; searching a whole home
-	 * directory is thousands, and the account that owns the archive is exactly
-	 * the one with the most files. Participants see their calls as shares and
-	 * fall through to the search, which for them covers a handful of files.
-	 */
-	private const FOLDERS = ['Talk/Транскрипции', 'Talk/Протоколы'];
+	/** Filenames start with the year, which is what makes them recognisable. */
+	private const NAME_PATTERN = '20%';
 
 	public function __construct(
 		private IRootFolder $rootFolder,
+		private IUserManager $userManager,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -55,18 +57,12 @@ class FileArchive {
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0): array {
-		// Candidates are chosen, ordered and paged on filenames alone, and only
-		// then are headers read. Opening every markdown file the user can see
-		// to draw one screen means thousands of storage reads — this instance
-		// has thirteen thousand of them — and the page is fifty rows long.
-		$candidates = $this->transcriptCandidates($userId);
-
-		// Filenames begin with the timestamp, so sorting them reverse-
-		// alphabetically is chronological, without opening anything.
-		usort($candidates, static fn (File $a, File $b) => strcmp($b->getName(), $a->getName()));
-
+		// Selection, ordering and paging all happen in the file index, which is
+		// what it is for. Doing any of it in PHP means fetching every markdown
+		// file the user can see — thirteen thousand of them on this instance —
+		// to display fifty rows.
 		$meetings = [];
-		foreach (array_slice($candidates, $offset, $limit) as $file) {
+		foreach ($this->transcripts($userId, $limit, $offset) as $file) {
 			$meta = $this->transcriptMetadata($file);
 			if ($meta !== null) {
 				$meetings[] = $meta;
@@ -84,16 +80,12 @@ class FileArchive {
 		$transcript = $this->fileFor($userId, $sessionId);
 		$prefix = $this->timestampPrefix($transcript->getName());
 
-		foreach ($this->markdownFiles($userId) as $candidate) {
-			$name = $candidate->getName();
-			// Cheap checks first: the timestamp rules out all but a handful
-			// before anything is opened.
-			if ($this->timestampPrefix($name) !== $prefix
-				|| !str_contains($name, self::MINUTES_MARKER)
-				|| $candidate->getId() === $transcript->getId()) {
-				continue;
+		// Asked of the index by name, so the answer is the one file rather than
+		// every file with a chance of being it.
+		foreach ($this->minutesMatching($userId, $prefix) as $candidate) {
+			if ($candidate->getId() !== $transcript->getId()) {
+				return $this->contents($candidate);
 			}
-			return $this->contents($candidate);
 		}
 
 		// A call that was transcribed but never analysed is a normal state, not
@@ -109,12 +101,27 @@ class FileArchive {
 	}
 
 	/**
+	 * The transcript behind a call id, if this person may see it.
+	 *
+	 * getById is resolved against the caller's own mounts, so a file they were
+	 * never given comes back as nothing — the permission check is the lookup.
+	 *
 	 * @throws BackendException
 	 */
 	private function fileFor(string $userId, string $sessionId): File {
-		foreach ($this->transcriptCandidates($userId) as $file) {
-			if ($this->sessionId($file) === $sessionId) {
-				return $file;
+		try {
+			$userFolder = $this->rootFolder->getUserFolder($userId);
+			$nodes = $userFolder->getById((int)$sessionId);
+		} catch (\Throwable $e) {
+			$this->logger->error('could not resolve call {id} for {user}', [
+				'id' => $sessionId, 'user' => $userId, 'exception' => $e,
+			]);
+			$nodes = [];
+		}
+
+		foreach ($nodes as $node) {
+			if ($node instanceof File) {
+				return $node;
 			}
 		}
 
@@ -135,43 +142,56 @@ class FileArchive {
 	}
 
 	/**
-	 * Files that could be a transcript, judged by name alone.
-	 *
-	 * The service names them "<timestamp> - <who>.md" and the minutes
-	 * "<timestamp> - Протокол <who>.md". Recognising both from the filename
-	 * costs nothing, and it is what keeps a listing from opening every note the
-	 * user has ever written.
+	 * Transcripts, newest first, one page at a time.
 	 *
 	 * @return File[]
 	 */
-	private function transcriptCandidates(string $userId): array {
-		return array_values(array_filter(
-			$this->markdownFiles($userId),
-			fn (File $file) => $this->timestampPrefix($file->getName()) !== ''
-				&& !str_contains($file->getName(), self::MINUTES_MARKER),
-		));
+	private function transcripts(string $userId, int $limit, int $offset): array {
+		return $this->search($userId, new BinaryOperator(
+			ISearchBinaryOperator::OPERATOR_AND,
+			$this->isMarkdown(),
+			$this->nameLike(self::NAME_PATTERN),
+			// The minutes sit beside the transcript and share its name; a
+			// listing that included them would show every call twice.
+			new BinaryOperator(ISearchBinaryOperator::OPERATOR_NOT,
+				$this->nameLike('%' . self::MINUTES_MARKER . '%')),
+		), $limit, $offset);
+	}
+
+	/**
+	 * The minutes belonging to a given timestamp.
+	 *
+	 * @return File[]
+	 */
+	private function minutesMatching(string $userId, string $prefix): array {
+		if ($prefix === '') {
+			return [];
+		}
+		return $this->search($userId, new BinaryOperator(
+			ISearchBinaryOperator::OPERATOR_AND,
+			$this->isMarkdown(),
+			$this->nameLike($prefix . '%'),
+			$this->nameLike('%' . self::MINUTES_MARKER . '%'),
+		), 5, 0);
 	}
 
 	/**
 	 * @return File[]
 	 */
-	private function markdownFiles(string $userId): array {
+	private function search(string $userId, ISearchOperator $operator,
+		int $limit, int $offset): array {
 		try {
 			$userFolder = $this->rootFolder->getUserFolder($userId);
-		} catch (\Throwable $e) {
-			$this->logger->error('could not open the files of {user}', [
-				'user' => $userId, 'exception' => $e,
-			]);
-			return [];
-		}
-
-		$fromFolders = $this->fromKnownFolders($userFolder);
-		if ($fromFolders !== []) {
-			return $fromFolders;
-		}
-
-		try {
-			$found = $userFolder->searchByMime('text/markdown');
+			$user = $this->userManager->get($userId);
+			$found = $userFolder->search(new Query(
+				$operator,
+				$limit,
+				$offset,
+				// Names begin with the timestamp, so descending by name is
+				// newest first — ordered by the database, not by us.
+				[new Order(ISearchOrder::DIRECTION_DESCENDING, 'name')],
+				$user,
+			));
 		} catch (\Throwable $e) {
 			// Show nothing rather than everything, and say why in the log.
 			$this->logger->error('could not search the archive for {user}', [
@@ -186,29 +206,13 @@ class FileArchive {
 		));
 	}
 
-	/**
-	 * @return File[]
-	 */
-	private function fromKnownFolders(Folder $userFolder): array {
-		$files = [];
-		foreach (self::FOLDERS as $path) {
-			try {
-				$folder = $userFolder->get($path);
-			} catch (\Throwable) {
-				// Absent for everyone but the service account. Not a problem:
-				// their calls arrive as shares and the search finds those.
-				continue;
-			}
-			if (!$folder instanceof Folder) {
-				continue;
-			}
-			foreach ($folder->getDirectoryListing() as $node) {
-				if ($node instanceof File) {
-					$files[] = $node;
-				}
-			}
-		}
-		return $files;
+	private function isMarkdown(): ISearchOperator {
+		return new Comparison(ISearchComparison::COMPARE_EQUAL,
+			'mimetype', 'text/markdown');
+	}
+
+	private function nameLike(string $pattern): ISearchOperator {
+		return new Comparison(ISearchComparison::COMPARE_LIKE, 'name', $pattern);
 	}
 
 	/**

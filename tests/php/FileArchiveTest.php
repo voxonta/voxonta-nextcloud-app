@@ -10,6 +10,9 @@ use OCP\AppFramework\Http;
 use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
+use OCP\Files\Search\ISearchQuery;
+use OCP\IUser;
+use OCP\IUserManager;
 use OCP\Files\NotFoundException;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -57,12 +60,23 @@ class FileArchiveTest extends TestCase {
 		}
 
 		$userFolder = $this->createMock(Folder::class);
-		$userFolder->method('searchByMime')->willReturnCallback(
-			function (string $mime) use ($nodes, $searchThrows) {
+		// Stand in for the file index: apply the query the way the database
+		// would, so the tests exercise the query we actually build.
+		$userFolder->method('search')->willReturnCallback(
+			function (ISearchQuery $query) use ($nodes, $searchThrows) {
 				if ($searchThrows) {
 					throw new \RuntimeException('storage unavailable');
 				}
-				return $nodes;
+				$matching = array_values(array_filter($nodes,
+					static fn (File $f) => self::satisfies($f->getName(),
+						$query->getSearchOperation())));
+				usort($matching, static fn ($a, $b) => strcmp($b->getName(), $a->getName()));
+				return array_slice($matching, $query->getOffset(), $query->getLimit());
+			});
+		$userFolder->method('getById')->willReturnCallback(
+			static function (int $id) use ($nodes) {
+				return array_values(array_filter($nodes,
+					static fn (File $f) => $f->getId() === $id));
 			});
 
 		$root = $this->createMock(IRootFolder::class);
@@ -72,7 +86,40 @@ class FileArchiveTest extends TestCase {
 				return $userFolder;
 			});
 
-		return new FileArchive($root, $this->createMock(LoggerInterface::class));
+		$users = $this->createMock(IUserManager::class);
+		$users->method('get')->willReturn($this->createMock(IUser::class));
+
+		return new FileArchive($root, $users,
+			$this->createMock(LoggerInterface::class));
+	}
+
+	/**
+	 * Evaluate a search operator against a filename, mirroring how the index
+	 * applies it. Only the operators this service builds are supported.
+	 */
+	private static function satisfies(string $name, $operator): bool {
+		if ($operator instanceof \OCP\Files\Search\ISearchBinaryOperator) {
+			$results = array_map(
+				static fn ($arg) => self::satisfies($name, $arg),
+				$operator->getArguments());
+			return match ($operator->getType()) {
+				'and' => !in_array(false, $results, true),
+				'or' => in_array(true, $results, true),
+				'not' => !$results[0],
+				default => true,
+			};
+		}
+
+		if ($operator instanceof \OCP\Files\Search\ISearchComparison) {
+			if ($operator->getField() === 'mimetype') {
+				return true;   // every fixture is markdown
+			}
+			$pattern = '/^' . str_replace('%', '.*',
+				preg_quote((string)$operator->getValue(), '/')) . '$/u';
+			return (bool)preg_match(str_replace('\%', '%', $pattern), $name);
+		}
+
+		return true;
 	}
 
 	private function transcriptFile(): array {
