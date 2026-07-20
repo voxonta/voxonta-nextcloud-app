@@ -50,11 +50,17 @@ room after the call.
 
 | Command | Effect |
 |---|---|
-| `/без-записи` | stop transcribing this call |
-| `/запись` | resume |
+| `/без-записи`, `/no-record` | stop transcribing this call |
+| `/запись`, `/record` | resume |
 
-The command works before the call starts and while it is running. Recording
-stops for everyone in that call.
+Either spelling works whatever language the room speaks. The command works
+before the call starts and while it is running. Recording stops for everyone in
+that call.
+
+**Language.** The app speaks English and Russian. The interface follows the
+language each person set in Nextcloud; the bot's replies, the menu entry and the
+admin settings follow the **Language** setting, since those are registered once
+for the whole instance rather than per viewer.
 
 **One-to-one calls** start being transcribed only after the second person
 answers, so a ringing call is never recorded.
