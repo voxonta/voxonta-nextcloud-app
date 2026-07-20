@@ -29,6 +29,37 @@ secret when the app is deployed.
     </dependencies>
 
     <external-app>
+        <!-- Nothing reaches the app through AppAPI's proxy unless it is listed
+             here: an unmatched path is a 404 before the request ever leaves
+             Nextcloud, and there is no implicit default. The bundle, the icon
+             and the archive API all travel that proxy, so all three need an
+             entry.
+
+             The archive endpoints are USER because they answer with the calls
+             the *caller* took part in — the app reads the authenticated user
+             from the request, and a PUBLIC route would arrive without one. -->
+        <routes>
+            <route>
+                <url>^/js/.*</url>
+                <verb>GET</verb>
+                <access_level>PUBLIC</access_level>
+            </route>
+            <route>
+                <url>^/css/.*</url>
+                <verb>GET</verb>
+                <access_level>PUBLIC</access_level>
+            </route>
+            <route>
+                <url>^/img/.*</url>
+                <verb>GET</verb>
+                <access_level>PUBLIC</access_level>
+            </route>
+            <route>
+                <url>^/v1/.*</url>
+                <verb>GET</verb>
+                <access_level>USER</access_level>
+            </route>
+        </routes>
         <docker-install>
             <registry>ghcr.io</registry>
             <image>devsoftmus/done-transcription-app</image>
