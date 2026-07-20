@@ -15,8 +15,9 @@
 	<div class="meeting-list-wrap">
 		<div class="meeting-list__filters">
 			<NcTextField
+				class="meeting-list__search"
 				:value.sync="query"
-				:label="t('done_transcription', 'Search by person or title')"
+				:label="t('done_transcription', 'Search')"
 				trailing-button-icon="close"
 				:show-trailing-button="query !== ''"
 				@update:value="onFilterChange"
@@ -395,13 +396,28 @@ export default {
 
 .meeting-list__filters {
 	display: flex;
-	gap: 8px;
-	padding: 8px 12px;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
 	border-bottom: 1px solid var(--color-border);
 }
 
+/* The search takes the room; the period is only as wide as its longest label. */
+.meeting-list__search {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
 .meeting-list__period {
-	min-width: 130px;
+	flex: 0 0 auto;
+	width: 120px;
+	min-width: 120px;
+}
+
+/* NcTextField ships with a top margin meant for stacked forms; here it just
+   adds height to the filter bar. */
+.meeting-list__search :deep(.input-field) {
+	margin-top: 0;
 }
 
 .meeting-list {

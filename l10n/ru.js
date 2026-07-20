@@ -35,11 +35,11 @@ OC.L10N.register(
         "This week": "На этой неделе",
         "Last week": "На прошлой неделе",
         "Earlier": "Ранее",
-        "Search by person or title": "Поиск по человеку или названию",
         "Period": "Период",
         "Any time": "За всё время",
         "Last 7 days": "За 7 дней",
         "Last 30 days": "За 30 дней",
-        "Last year": "За год"
+        "Last year": "За год",
+        "Search": "Поиск"
     },
     "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);");

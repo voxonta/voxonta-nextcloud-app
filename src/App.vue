@@ -69,3 +69,17 @@ export default {
 	},
 }
 </script>
+
+<!--
+	Not scoped: the mount point and Nextcloud's content wrapper are outside this
+	component. Vue mounts into a div that sits inside the standard content area,
+	and NcContent then builds its own full-height frame inside that — so the
+	mount point has to be told to fill its parent, or a strip of desktop shows
+	above the app.
+-->
+<style>
+#done_transcription {
+	width: 100%;
+	height: 100%;
+}
+</style>
