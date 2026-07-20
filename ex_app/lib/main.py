@@ -23,6 +23,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI
 from nc_py_api import AsyncNextcloudApp, talk_bot
 from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, atalk_bot_msg, run_app, set_handlers
 
+import archive_api
 import settings
 import talk_bot as bot
 
@@ -38,6 +39,9 @@ async def lifespan(_app: FastAPI):
 
 
 APP = FastAPI(lifespan=lifespan)
+# Read-only archive endpoints for the UI. Registered here so the browser reaches
+# them through the AppAPI proxy; the backend token never leaves this process.
+APP.include_router(archive_api.ROUTER)
 # Global AppAPI auth. set_handlers() exempts /heartbeat itself; do not add our
 # own auth in front of it.
 APP.add_middleware(AppAPIAuthMiddleware)
