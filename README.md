@@ -19,7 +19,7 @@ to do next.
 
 ## Requirements
 
-- **Nextcloud 30 or newer**
+- **Nextcloud 30 or newer.** Developed and tested against 33.
 - **Talk with a High Performance Backend (HPB).** Audio is captured through the
   signalling server, so a Talk installation without an HPB is not supported.
 - **The transcription service**, reachable from Nextcloud. It does the recording

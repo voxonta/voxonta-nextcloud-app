@@ -38,7 +38,12 @@ for item in appinfo lib templates img js l10n README.md COPYING; do
 	fi
 done
 
-tar -czf "${OUT}/${APP_ID}-${VERSION}.tar.gz" -C "${OUT}" "${APP_ID}"
+# COPYFILE_DISABLE keeps macOS from writing its ._ AppleDouble companions into
+# the archive. Nextcloud's autoloader treats ._PageController.php as a class
+# file and fails to load it, on every request, with an error that names a class
+# nobody wrote.
+COPYFILE_DISABLE=1 tar -czf "${OUT}/${APP_ID}-${VERSION}.tar.gz" \
+	--exclude '._*' --exclude '.DS_Store' -C "${OUT}" "${APP_ID}"
 rm -rf "${OUT:?}/${APP_ID}"
 
 echo "built ${OUT}/${APP_ID}-${VERSION}.tar.gz"
