@@ -397,12 +397,12 @@ export default {
 .meeting-list__filters {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	padding: 4px 8px;
+	gap: 8px;
+	padding: 6px 8px;
 	border-bottom: 1px solid var(--color-border);
 }
 
-/* The search takes the room; the period is only as wide as its longest label. */
+/* The search takes the room; the period is only as wide as its label. */
 .meeting-list__search {
 	flex: 1 1 auto;
 	min-width: 0;
@@ -410,14 +410,26 @@ export default {
 
 .meeting-list__period {
 	flex: 0 0 auto;
-	width: 120px;
-	min-width: 120px;
+	width: 150px;
 }
 
-/* NcTextField ships with a top margin meant for stacked forms; here it just
-   adds height to the filter bar. */
+/* NcSelect carries its own minimum width and internal container, so the width
+   has to be set on the inner element, not just the wrapper — otherwise it
+   stretches far wider than its content. */
+.meeting-list__period :deep(.v-select) {
+	min-width: 0;
+	width: 150px;
+}
+
+/* Line the two controls up on the same height: NcTextField's stacked-form top
+   margin would otherwise push it below the select. */
 .meeting-list__search :deep(.input-field) {
-	margin-top: 0;
+	margin: 0;
+}
+
+.meeting-list__filters :deep(.input-field__input),
+.meeting-list__period :deep(.v-select) {
+	min-height: var(--default-clickable-area);
 }
 
 .meeting-list {
