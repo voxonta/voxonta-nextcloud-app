@@ -30,6 +30,10 @@ OC.L10N.register(
         "Show transcript": "Показать расшифровку",
         "Please try again.": "Попробуйте ещё раз.",
         "Could not resume recording. Please try again.": "Не удалось возобновить запись. Попробуйте ещё раз.",
-        "Could not stop the recording. It may still be running — please ask an administrator.": "Не удалось остановить запись. Возможно, она продолжается — обратитесь к администратору."
+        "Could not stop the recording. It may still be running — please ask an administrator.": "Не удалось остановить запись. Возможно, она продолжается — обратитесь к администратору.",
+        "Yesterday": "Вчера",
+        "This week": "На этой неделе",
+        "Last week": "На прошлой неделе",
+        "Earlier": "Ранее"
     },
     "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);");

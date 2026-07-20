@@ -39,20 +39,31 @@
 		</NcEmptyContent>
 
 		<ul v-else>
-			<NcListItem
-				v-for="meeting in meetings"
-				:key="meeting.session_id"
-				:name="meeting.room_name || t('done_transcription', 'Untitled call')"
-				:active="meeting.session_id === selectedId"
-				:details="duration(meeting)"
-				@click="$emit('select', meeting)">
-				<template #icon>
-					<MicrophoneIcon :size="32" />
-				</template>
-				<template #subname>
-					{{ when(meeting) }} · {{ people(meeting) }}
-				</template>
-			</NcListItem>
+			<!--
+				Grouped by when the call happened, with the group heading pinned
+				to the top as you scroll past it — so it is always clear whether
+				the row under the cursor is from today or from last month, without
+				reading each date.
+			-->
+			<template v-for="group in groups">
+				<li :key="group.key" class="meeting-list__heading">
+					{{ group.label }}
+				</li>
+				<NcListItem
+					v-for="meeting in group.meetings"
+					:key="meeting.session_id"
+					:name="meeting.room_name || t('done_transcription', 'Untitled call')"
+					:active="meeting.session_id === selectedId"
+					:details="duration(meeting)"
+					@click="$emit('select', meeting)">
+					<template #icon>
+						<MicrophoneIcon :size="32" />
+					</template>
+					<template #subname>
+						{{ when(meeting) }} · {{ people(meeting) }}
+					</template>
+				</NcListItem>
+			</template>
 		</ul>
 
 		<!--
@@ -120,6 +131,58 @@ export default {
 			// next page, so the button is shown instead.
 			scrollable: false,
 		}
+	},
+
+	computed: {
+		// The loaded meetings split into date buckets, in the order they appear
+		// — the list is already newest-first, so the buckets come out in order
+		// too. Anything older than last week is grouped by month, which keeps
+		// the number of headings bounded however far back you scroll.
+		groups() {
+			const now = new Date()
+			const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+			const today = startOfDay(now)
+			const dayMs = 86400000
+			const yesterday = new Date(today - dayMs)
+			// Week starts Monday, the working-week convention here.
+			const weekStart = new Date(today - ((now.getDay() + 6) % 7) * dayMs)
+			const lastWeekStart = new Date(weekStart - 7 * dayMs)
+
+			const bucket = (ts) => {
+				const d = new Date(ts * 1000)
+				if (d >= today) {
+					return { key: 'today', label: this.t('done_transcription', 'Today') }
+				}
+				if (d >= yesterday) {
+					return { key: 'yesterday', label: this.t('done_transcription', 'Yesterday') }
+				}
+				if (d >= weekStart) {
+					return { key: 'this-week', label: this.t('done_transcription', 'This week') }
+				}
+				if (d >= lastWeekStart) {
+					return { key: 'last-week', label: this.t('done_transcription', 'Last week') }
+				}
+				// The browser localises the month name for us.
+				const label = d.toLocaleDateString([], { month: 'long', year: 'numeric' })
+				return { key: `${d.getFullYear()}-${d.getMonth()}`, label }
+			}
+
+			const groups = []
+			let current = null
+			for (const meeting of this.meetings) {
+				// A call with no start time cannot be placed on the timeline;
+				// keep it visible under a heading of its own rather than drop it.
+				const b = meeting.call_start_ts
+					? bucket(meeting.call_start_ts)
+					: { key: 'undated', label: this.t('done_transcription', 'Earlier') }
+				if (!current || current.key !== b.key) {
+					current = { key: b.key, label: b.label, meetings: [] }
+					groups.push(current)
+				}
+				current.meetings.push(meeting)
+			}
+			return groups
+		},
 	},
 
 	mounted() {
@@ -257,6 +320,18 @@ export default {
 
 .meeting-list__loading {
 	margin-top: 32px;
+}
+
+.meeting-list__heading {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: 8px 16px 4px;
+	background-color: var(--color-main-background);
+	color: var(--color-text-maxcontrast);
+	font-size: 0.8em;
+	font-weight: bold;
+	text-transform: uppercase;
 }
 
 .meeting-list__more {
