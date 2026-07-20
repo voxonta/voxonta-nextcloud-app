@@ -127,8 +127,7 @@ composer install
 npm ci
 
 npm run watch      # rebuild the frontend on change
-composer test      # controller tests, no Nextcloud instance needed
-python3 -m pytest tests    # translations and packaging
+composer test      # all tests; no Nextcloud instance needed
 ```
 
 Symlink the checkout into a Nextcloud installation's `apps/` directory and

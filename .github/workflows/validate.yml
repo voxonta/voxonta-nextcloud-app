@@ -20,14 +20,6 @@ jobs:
       - run: composer install --no-interaction --no-progress
       - run: composer test
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install pytest
-      # Translations and the bundle/addScript pairing both fail silently at
-      # runtime, so they are worth a check that fails loudly here.
-      - run: python -m pytest tests -v
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
