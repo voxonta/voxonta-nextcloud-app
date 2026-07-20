@@ -124,11 +124,13 @@ request.
 
 ```bash
 composer install
-npm ci
+npm install
 
-npm run watch      # rebuild the frontend on change
+npm run watch      # rebuild the frontend on change (Vite)
 composer test      # all tests; no Nextcloud instance needed
 ```
+
+Frontend: Vue 3 + Vite + @nextcloud/vue 9, the current Nextcloud 33 stack.
 
 Symlink the checkout into a Nextcloud installation's `apps/` directory and
 enable it as usual.

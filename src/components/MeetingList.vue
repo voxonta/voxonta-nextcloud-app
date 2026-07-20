@@ -16,7 +16,7 @@
 		<div class="meeting-list__filters">
 			<NcTextField
 				class="meeting-list__search"
-				:value.sync="query"
+				v-model:value="query"
 				:label="t('done_transcription', 'Search')"
 				trailing-button-icon="close"
 				:show-trailing-button="query !== ''"
@@ -68,8 +68,8 @@
 				the row under the cursor is from today or from last month, without
 				reading each date.
 			-->
-			<template v-for="group in groups">
-				<li :key="group.key" class="meeting-list__heading">
+			<template v-for="group in groups" :key="group.key">
+				<li class="meeting-list__heading">
 					{{ group.label }}
 				</li>
 				<NcListItem
@@ -113,12 +113,12 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
-import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
-import NcListItem from '@nextcloud/vue/dist/Components/NcListItem.js'
-import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
-import NcSelect from '@nextcloud/vue/dist/Components/NcSelect.js'
-import NcTextField from '@nextcloud/vue/dist/Components/NcTextField.js'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
+import NcListItem from '@nextcloud/vue/components/NcListItem'
+import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import NcSelect from '@nextcloud/vue/components/NcSelect'
+import NcTextField from '@nextcloud/vue/components/NcTextField'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
 import MagnifyIcon from 'vue-material-design-icons/Magnify.vue'
 import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'

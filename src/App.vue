@@ -37,9 +37,9 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import NcAppContent from '@nextcloud/vue/dist/Components/NcAppContent.js'
-import NcContent from '@nextcloud/vue/dist/Components/NcContent.js'
-import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
+import NcAppContent from '@nextcloud/vue/components/NcAppContent'
+import NcContent from '@nextcloud/vue/components/NcContent'
+import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
 import MeetingDetail from './components/MeetingDetail.vue'
 import MeetingList from './components/MeetingList.vue'
@@ -70,16 +70,3 @@ export default {
 }
 </script>
 
-<!--
-	Not scoped: the mount point and Nextcloud's content wrapper are outside this
-	component. Vue mounts into a div that sits inside the standard content area,
-	and NcContent then builds its own full-height frame inside that — so the
-	mount point has to be told to fill its parent, or a strip of desktop shows
-	above the app.
--->
-<style>
-#done_transcription {
-	width: 100%;
-	height: 100%;
-}
-</style>

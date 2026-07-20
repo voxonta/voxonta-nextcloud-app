@@ -75,10 +75,10 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
-import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
-import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
-import NcRichText from '@nextcloud/vue/dist/Components/NcRichText.js'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
+import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import NcRichText from '@nextcloud/vue/components/NcRichText'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
 import MicrophoneOffIcon from 'vue-material-design-icons/MicrophoneOff.vue'
 import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'

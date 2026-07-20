@@ -42,8 +42,12 @@ done
 # the archive. Nextcloud's autoloader treats ._PageController.php as a class
 # file and fails to load it, on every request, with an error that names a class
 # nobody wrote.
+# Source maps are for development; shipping them multiplies the archive and
+# exposes the un-minified source. COPYFILE_DISABLE keeps macOS from adding ._
+# companions the autoloader would choke on.
 COPYFILE_DISABLE=1 tar -czf "${OUT}/${APP_ID}-${VERSION}.tar.gz" \
-	--exclude '._*' --exclude '.DS_Store' -C "${OUT}" "${APP_ID}"
+	--exclude '._*' --exclude '.DS_Store' --exclude '*.map' \
+	-C "${OUT}" "${APP_ID}"
 rm -rf "${OUT:?}/${APP_ID}"
 
 echo "built ${OUT}/${APP_ID}-${VERSION}.tar.gz"

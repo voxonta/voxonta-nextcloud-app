@@ -1,19 +1,18 @@
 /**
  * Entry point for the archive UI.
  *
- * Nothing special is needed to locate assets any more: Nextcloud serves this
- * bundle from the app itself, so webpack's default public path is correct. The
- * previous version had to override it, because the bundle travelled through
- * AppAPI's proxy and chunks otherwise resolved against the Nextcloud root and
- * 404'd — in a real installation only, never in development.
+ * Vue 3: createApp mounts into the template's div rather than replacing it, so
+ * the mount point stays in the DOM — unlike Vue 2's `el`, which replaced it.
  */
-import Vue from 'vue'
+import { createApp } from 'vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import App from './App.vue'
 
-Vue.mixin({ methods: { t, n } })
+const app = createApp(App)
 
-export default new Vue({
-	el: '#done_transcription',
-	render: h => h(App),
-})
+// t/n as global properties, so every component can call them in its template
+// the way Nextcloud components expect.
+app.config.globalProperties.t = t
+app.config.globalProperties.n = n
+
+app.mount('#done_transcription')
