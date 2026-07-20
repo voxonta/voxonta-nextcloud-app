@@ -142,3 +142,14 @@ def test_auto_falls_back_to_english():
     assert l10n.translate("Meetings", "auto") == "Meetings"
     assert l10n.translate("Meetings", "") == "Meetings"
     assert l10n.translate("Meetings", "ru_RU") == "Встречи"
+
+
+def test_the_language_default_matches_the_form():
+    """Until an administrator presses Save there is nothing in appconfig, so the
+    fallback and the form's own default have to be the same value — otherwise a
+    fresh install speaks one language while the settings screen shows another."""
+    import settings
+
+    field = next(f for f in settings.build_form().fields
+                 if f.id == settings.KEY_LANGUAGE)
+    assert field.default == settings.DEFAULT_LANGUAGE

@@ -18,7 +18,7 @@ Requires Talk with a High Performance Backend: call audio is captured through th
 signalling server. The administrator enters the HPB address and its internal
 secret when the app is deployed.
     ]]></description>
-    <version>0.4.0</version>
+    <version>0.4.1</version>
     <licence>agpl</licence>
     <author>Done</author>
     <namespace>DoneTranscription</namespace>
@@ -32,7 +32,7 @@ secret when the app is deployed.
         <docker-install>
             <registry>ghcr.io</registry>
             <image>devsoftmus/done-transcription-app</image>
-            <image-tag>latest</image-tag>
+            <image-tag>0.4.1</image-tag>
         </docker-install>
         <!-- Filled in by the administrator under "Deploy Options". Read at deploy
              time; changing them later requires reinstalling the app. -->

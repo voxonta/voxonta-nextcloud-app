@@ -29,6 +29,12 @@ KEY_LANGUAGE = "language"
 KEY_PUBLISH_TO_CHAT = "publish_to_chat"
 KEY_ALLOWED_GROUPS = "allowed_groups"
 
+# The language a fresh install speaks. It is the form's default too, and the two
+# must not drift: appconfig holds nothing until an administrator presses Save,
+# so a mismatch means the app talks in one language while the settings screen
+# claims another.
+DEFAULT_LANGUAGE = "ru"
+
 
 def build_form(lang: str = "") -> SettingsForm:
     def _(text: str) -> str:
@@ -76,7 +82,7 @@ def build_form(lang: str = "") -> SettingsForm:
                     "language of this app's own interface."
                 ),
                 type=SettingsFieldType.SELECT,
-                default="ru",
+                default=DEFAULT_LANGUAGE,
                 options={_("Russian"): "ru", _("English"): "en",
                          "Auto": "auto"},
             ),
@@ -109,13 +115,19 @@ def build_form(lang: str = "") -> SettingsForm:
 
 
 async def current_language(nc: AsyncNextcloudApp) -> str:
-    """The language the app should speak in. Empty on failure — English."""
+    """The language the app should speak in.
+
+    Falls back to the form's own default, not to an empty string: until an
+    administrator saves the form there is nothing in appconfig, and treating
+    that as "no language" would show a Russian instance an English menu.
+    """
     try:
-        return str(await nc.appconfig_ex.get_value(KEY_LANGUAGE, default="") or "")
+        return str(await nc.appconfig_ex.get_value(
+            KEY_LANGUAGE, default=DEFAULT_LANGUAGE) or DEFAULT_LANGUAGE)
     except Exception:
         # Not worth failing a registration over; English is a usable answer.
         logger.warning("could not read the language setting", exc_info=True)
-        return ""
+        return DEFAULT_LANGUAGE
 
 
 async def register(nc: AsyncNextcloudApp) -> None:
