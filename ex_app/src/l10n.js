@@ -1,11 +1,15 @@
 /**
  * Translations, carried in the bundle.
  *
- * Nextcloud's usual mechanism (OC.L10N.register + l10n/*.js) is not wired up for
- * external apps — AppAPI has no route that serves an ExApp's translation files —
- * so shipping them inside the bundle is what actually works. The shape is kept
- * close to the standard one so moving to it later is a matter of extracting this
- * object, not rewriting call sites.
+ * There is a standard route: AppAPI copies an ExApp's l10n files into Nextcloud
+ * at registration time if info.xml declares a `translations_folder`. Worth
+ * moving to — it is what translation platforms expect — but it binds the
+ * translations to the install step, and this app is still changing shape too
+ * often for that. Carrying them in the bundle keeps them in sync with the code
+ * that uses them, at the cost of the tooling.
+ *
+ * The shape is kept close to the standard one, so switching is a matter of
+ * extracting this object into l10n/*.js, not of rewriting call sites.
  *
  * English is the source language and lives in the call sites themselves; a
  * missing translation therefore degrades to readable English rather than to a
