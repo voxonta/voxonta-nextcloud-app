@@ -25,6 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from nc_py_api import AsyncNextcloudApp
 from nc_py_api.ex_app import anc_app
 
+import settings
+
 logger = logging.getLogger(__name__)
 
 ROUTER = APIRouter(prefix="/v1")
@@ -69,6 +71,48 @@ def _current_user(nc: AsyncNextcloudApp) -> str:
     return getattr(nc, "user", "") or ""
 
 
+async def _allowed_groups(nc: AsyncNextcloudApp) -> tuple[str, ...]:
+    """Groups permitted to open the archive. Empty tuple means everyone."""
+    try:
+        raw = await nc.appconfig_ex.get_value(settings.KEY_ALLOWED_GROUPS,
+                                              default="")
+    except Exception:
+        # Reading the setting failed, not "the setting is empty". Falling back
+        # to "everyone" would quietly undo the administrator's restriction, so
+        # deny instead — a visible outage beats a silent leak.
+        logger.exception("could not read the group restriction")
+        raise HTTPException(503, "access rules unavailable")
+    return tuple(g.strip() for g in str(raw or "").split(",") if g.strip())
+
+
+async def _require_access(nc: AsyncNextcloudApp) -> str:
+    """The caller, once confirmed to be allowed here at all.
+
+    This gate is about who may open the archive; whether they may read a
+    particular meeting is a separate check (participation), because being in the
+    permitted group does not make someone a participant of every call.
+    """
+    user = _current_user(nc)
+    if not user:
+        raise HTTPException(401, "unknown user")
+
+    allowed = await _allowed_groups(nc)
+    if not allowed:
+        return user
+
+    try:
+        info = await nc.users.get_user(user)
+        member_of = set(getattr(info, "groups", []) or [])
+    except Exception:
+        logger.exception("could not read groups for %s", user)
+        raise HTTPException(503, "access rules unavailable")
+
+    if not member_of.intersection(allowed):
+        logger.info("%s is not in any group allowed to open the archive", user)
+        raise HTTPException(403, "the meeting archive is not available for your account")
+    return user
+
+
 @ROUTER.get("/meetings")
 async def list_meetings(request: Request,
                         nc: AsyncNextcloudApp = Depends(anc_app)):
@@ -78,9 +122,7 @@ async def list_meetings(request: Request,
     client asking for someone else's meetings is asking for something it should
     not have.
     """
-    user = _current_user(nc)
-    if not user:
-        raise HTTPException(401, "unknown user")
+    user = await _require_access(nc)
 
     try:
         limit = min(int(request.query_params.get("limit", 50)), 200)
@@ -101,9 +143,7 @@ async def _meeting_or_403(session_id: str, nc: AsyncNextcloudApp) -> dict:
     links. Without this check, one forwarded URL would open a call to someone
     who was never in it.
     """
-    user = _current_user(nc)
-    if not user:
-        raise HTTPException(401, "unknown user")
+    user = await _require_access(nc)
 
     meeting = await _get(f"/v1/meetings/{session_id}")
     participants = meeting.get("participants") or []

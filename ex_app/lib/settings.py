@@ -25,6 +25,7 @@ KEY_ENABLED = "transcription_enabled"
 KEY_ROOM_ALLOWLIST = "room_allowlist"
 KEY_LANGUAGE = "language"
 KEY_PUBLISH_TO_CHAT = "publish_to_chat"
+KEY_ALLOWED_GROUPS = "allowed_groups"
 
 
 def build_form() -> SettingsForm:
@@ -69,6 +70,20 @@ def build_form() -> SettingsForm:
                 type=SettingsFieldType.SELECT,
                 default="ru",
                 options={"Russian": "ru", "English": "en", "Auto-detect": "auto"},
+            ),
+            SettingsField(
+                id=KEY_ALLOWED_GROUPS,
+                title="Who can open the archive",
+                description=(
+                    "Comma-separated group names. Leave empty to let everyone "
+                    "read the meetings they took part in. Note that this "
+                    "restricts access to the data, not the menu entry — "
+                    "Nextcloud does not let an external app hide that per "
+                    "group."
+                ),
+                type=SettingsFieldType.TEXT,
+                default="",
+                placeholder="managers, hr",
             ),
             SettingsField(
                 id=KEY_PUBLISH_TO_CHAT,

@@ -26,8 +26,28 @@ import archive_api  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 
 
+def _nc_with_groups(user, groups, *, setting="", setting_fails=False,
+                    groups_fail=False):
+    """A Nextcloud stub that can also fail the way the real one might."""
+    class AppConfig:
+        async def get_value(self, key, default=None):
+            if setting_fails:
+                raise RuntimeError("appconfig unavailable")
+            return setting
+
+    class Users:
+        async def get_user(self, uid):
+            if groups_fail:
+                raise RuntimeError("user lookup failed")
+            return SimpleNamespace(groups=groups)
+
+    return SimpleNamespace(user=user, appconfig_ex=AppConfig(), users=Users())
+
+
 def _nc(user):
-    return SimpleNamespace(user=user)
+    """A caller with no group restriction configured — these tests are about
+    participation, not about who may open the archive at all."""
+    return _nc_with_groups(user, [], setting="")
 
 
 def _backend(monkeypatch, meetings=None, meeting=None, calls=None):
@@ -120,3 +140,62 @@ def test_an_unidentified_caller_gets_nothing(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         asyncio.run(archive_api.list_meetings(request, _nc("")))
     assert exc.value.status_code == 401
+
+
+def test_no_group_restriction_means_everyone(monkeypatch):
+    """The default must stay open: an empty setting is not a lockout."""
+    _backend(monkeypatch, meetings=[])
+    request = SimpleNamespace(query_params={})
+    asyncio.run(archive_api.list_meetings(
+        request, _nc_with_groups("alice", ["staff"], setting="")))
+
+
+def test_member_of_an_allowed_group_gets_in(monkeypatch):
+    _backend(monkeypatch, meetings=[])
+    request = SimpleNamespace(query_params={})
+    asyncio.run(archive_api.list_meetings(
+        request, _nc_with_groups("alice", ["staff", "managers"],
+                                 setting="managers, hr")))
+
+
+def test_outsider_is_refused(monkeypatch):
+    _backend(monkeypatch, meetings=[{"session_id": "s1"}])
+    request = SimpleNamespace(query_params={})
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(archive_api.list_meetings(
+            request, _nc_with_groups("alice", ["staff"], setting="managers")))
+    assert exc.value.status_code == 403
+
+
+def test_the_restriction_covers_individual_meetings_too(monkeypatch):
+    """Blocking only the list would leave every meeting readable by direct id."""
+    _backend(monkeypatch, meeting={"session_id": "s1", "participants": ["alice"]})
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(archive_api.get_meeting(
+            "s1", _nc_with_groups("alice", ["staff"], setting="managers")))
+    assert exc.value.status_code == 403
+
+
+def test_unreadable_setting_denies_rather_than_opens(monkeypatch):
+    """If the restriction cannot be read, treating it as absent would quietly
+    undo what the administrator configured."""
+    _backend(monkeypatch, meetings=[])
+    request = SimpleNamespace(query_params={})
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(archive_api.list_meetings(
+            request, _nc_with_groups("alice", ["staff"], setting_fails=True)))
+    assert exc.value.status_code == 503, "a failed lookup opened the archive"
+
+
+def test_unreadable_group_membership_denies_too(monkeypatch):
+    _backend(monkeypatch, meetings=[])
+    request = SimpleNamespace(query_params={})
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(archive_api.list_meetings(
+            request, _nc_with_groups("alice", [], setting="managers",
+                                     groups_fail=True)))
+    assert exc.value.status_code == 503
