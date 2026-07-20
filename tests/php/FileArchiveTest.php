@@ -34,6 +34,13 @@ class FileArchiveTest extends TestCase {
 
 	private const MINUTES = "# Протокол\n\nРешили выкатывать.\n";
 
+	private const YAML = "---\ndate: 2026-07-20\n"
+		. "started_at: 2026-07-20T14:00:23Z\n"
+		. "finished_at: 2026-07-20T14:40:23Z\n"
+		. "participants:\n  - Анатолий Хватиков\n  - Евгений Кутявин\n"
+		. "meeting_name: \"Вводная встреча по Superset\"\n"
+		. "tags:\n  - type/meeting\n---\n\n# Встреча\n";
+
 	/**
 	 * Build an archive over the given files, exactly as they exist in
 	 * Nextcloud today: markdown in a shared folder, no tags, no front matter.
@@ -114,9 +121,13 @@ class FileArchiveTest extends TestCase {
 			if ($operator->getField() === 'mimetype') {
 				return true;   // every fixture is markdown
 			}
-			$pattern = '/^' . str_replace('%', '.*',
-				preg_quote((string)$operator->getValue(), '/')) . '$/u';
-			return (bool)preg_match(str_replace('\%', '%', $pattern), $name);
+			// LIKE semantics: % is any run of characters, _ is exactly one.
+			// Getting _ wrong here would let a test accept a pattern the
+			// database rejects rows on — which is how the prompt files ended up
+			// filling the first page in production.
+			$pattern = preg_quote((string)$operator->getValue(), '/');
+			$pattern = str_replace(['%', '_'], ['.*', '.'], $pattern);
+			return (bool)preg_match('/^' . $pattern . '$/u', $name);
 		}
 
 		return true;
@@ -229,5 +240,79 @@ class FileArchiveTest extends TestCase {
 
 		$this->assertSame('Вадим Куницын', $meetings[0]['room_name'],
 			'the call people look for is almost always a recent one');
+	}
+
+	/**
+	 * Nextcloud interpolates search operators into strings while building the
+	 * query, but the published interfaces never say so — the omission surfaced
+	 * in production as "could not be converted to string", thrown from inside
+	 * code that never mentions this app.
+	 */
+	public function testSearchOperatorsCanBeConvertedToString(): void {
+		$comparison = new \OCA\DoneTranscription\Service\Search\Comparison(
+			'eq', 'mimetype', 'text/markdown');
+		$this->assertStringContainsString('mimetype', (string)$comparison);
+
+		$binary = new \OCA\DoneTranscription\Service\Search\BinaryOperator(
+			'and', $comparison, $comparison);
+		$this->assertStringContainsString('and', (string)$binary);
+
+		$negated = new \OCA\DoneTranscription\Service\Search\BinaryOperator(
+			'not', $comparison);
+		$this->assertStringContainsString('not', (string)$negated);
+	}
+
+	public function testFilesThatMerelyStartWithTwentyAreNotCalls(): void {
+		// The prompt files on this instance are named 20_extract_knowledge.md,
+		// and "_" sorts above digits — a looser pattern let them fill the whole
+		// first page and pushed every real transcript off it.
+		$archive = $this->archive([
+			'20_extract_knowledge.md' => "# Prompt\n",
+			'20_cross_check.md' => "# Prompt\n",
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+		]);
+
+		$meetings = $archive->list('alice');
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('Вадим Куницын', $meetings[0]['room_name']);
+	}
+
+	public function testTheCurrentYamlFormatIsRead(): void {
+		$archive = $this->archive([
+			'2026-07-20 17-00-23 - Вводная встреча по Superset.md' => self::YAML,
+		]);
+
+		$meetings = $archive->list('alice');
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('Вводная встреча по Superset', $meetings[0]['room_name'],
+			'the meeting name in the header is better than the one in the filename');
+		$this->assertSame(['Анатолий Хватиков', 'Евгений Кутявин'],
+			$meetings[0]['participants']);
+		$this->assertSame(40 * 60,
+			$meetings[0]['call_end_ts'] - $meetings[0]['call_start_ts']);
+	}
+
+	public function testBothFormatsAppearInOneList(): void {
+		// The archive holds months of each; reading only one silently drops the
+		// other.
+		$archive = $this->archive([
+			'2026-07-20 17-00-23 - Superset.md' => self::YAML,
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+		]);
+
+		$this->assertCount(2, $archive->list('alice'));
+	}
+
+	public function testAYamlFileThatIsNotACallIsIgnored(): void {
+		// Front matter alone is not a transcript — plenty of notes have it.
+		$archive = $this->archive([
+			'2026-07-20 10-00-00 - Notes.md' =>
+				"---\ntitle: Just notes\ntags:\n  - idea\n---\n\nText\n",
+		]);
+
+		$this->assertSame([], $archive->list('alice'),
+			'a call is recognised by having a time, not by having a header');
 	}
 }

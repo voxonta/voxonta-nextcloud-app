@@ -31,4 +31,17 @@ class Comparison extends Operator implements ISearchComparison {
 	public function getExtra(): string {
 		return $this->extra;
 	}
+
+	/**
+	 * Nextcloud's own implementations define this and interpolate operators
+	 * into strings while building the query. The interface does not mention it,
+	 * so the requirement only shows up at runtime — as "could not be converted
+	 * to string", from inside code that never names us.
+	 */
+	public function __toString(): string {
+		$value = $this->value instanceof \DateTime
+			? $this->value->format(\DateTime::ATOM)
+			: (is_array($this->value) ? implode(',', $this->value) : (string)$this->value);
+		return $this->field . ' ' . $this->type . ' ' . $value;
+	}
 }

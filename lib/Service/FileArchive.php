@@ -38,11 +38,18 @@ use Psr\Log\LoggerInterface;
  * is what the service already puts there.
  */
 class FileArchive {
-	private const HEADER = '# Транскрипция:';
+	private const HEADER_LEGACY = '# Транскрипция:';
 	private const MINUTES_MARKER = 'Протокол';
 
-	/** Filenames start with the year, which is what makes them recognisable. */
-	private const NAME_PATTERN = '20%';
+	/**
+	 * The date a transcript's filename starts with: "2026-03-24 …".
+	 *
+	 * `_` matches exactly one character, so this is the shape of a date and not
+	 * merely "starts with 20". The looser version also matched prompt files
+	 * named 20_extract_knowledge.md — and since `_` sorts above digits, those
+	 * filled the whole first page and pushed every real transcript out of it.
+	 */
+	private const NAME_PATTERN = '20__-__-__ %';
 
 	public function __construct(
 		private IRootFolder $rootFolder,
@@ -61,13 +68,32 @@ class FileArchive {
 		// what it is for. Doing any of it in PHP means fetching every markdown
 		// file the user can see — thirteen thousand of them on this instance —
 		// to display fifty rows.
+		$files = $this->transcripts($userId, $limit, $offset);
+
 		$meetings = [];
-		foreach ($this->transcripts($userId, $limit, $offset) as $file) {
+		foreach ($files as $file) {
 			$meta = $this->transcriptMetadata($file);
 			if ($meta !== null) {
 				$meetings[] = $meta;
 			}
 		}
+
+		// An empty archive and a query that matches nothing look identical from
+		// the outside, and the difference is the whole diagnosis.
+		// Counts only: an empty archive and a query that matches nothing look
+		// identical from the outside, and the difference is the whole
+		// diagnosis. Filenames are not logged — they carry meeting titles and
+		// participants.
+		// Counts only — never names or content: filenames carry meeting titles
+		// and participants. An empty archive and a query that matched nothing
+		// look identical from outside, and that difference is the diagnosis.
+		$this->logger->debug('archive listing for {user}: {found} candidates, '
+			. '{kept} transcripts', [
+				'user' => $userId,
+				'found' => count($files),
+				'kept' => count($meetings),
+			]);
+
 		return $meetings;
 	}
 
@@ -216,29 +242,99 @@ class FileArchive {
 	}
 
 	/**
-	 * Read what the transcript's own header states.
+	 * What the transcript itself states about the call.
 	 *
-	 * Only the head of the file is read: the body is the conversation and can
-	 * be long, and drawing one screen must not mean loading the whole archive.
+	 * Two formats are in the archive and both have to work. Current files open
+	 * with a YAML block — started_at, participants, meeting_name. Files from
+	 * the spring open with "# Транскрипция:" and a couple of Russian-labelled
+	 * lines. Reading only the newer one would silently drop several months of
+	 * calls; converting them would rewrite files people already have.
 	 *
 	 * @return array<string, mixed>|null null when this is not a transcript
 	 */
 	private function transcriptMetadata(File $file): ?array {
 		$head = $this->head($file);
-		if ($head === null || !str_starts_with(ltrim($head), self::HEADER)) {
+		if ($head === null) {
+			return null;
+		}
+		$head = ltrim($head);
+
+		$meta = str_starts_with($head, '---')
+			? $this->fromYaml($head)
+			: (str_starts_with($head, self::HEADER_LEGACY)
+				? $this->fromLegacyHeader($head)
+				: null);
+
+		if ($meta === null) {
 			return null;
 		}
 
-		$name = $file->getName();
-		[$start, $end] = $this->period($head);
+		$name = $meta['meeting_name'] !== ''
+			? $meta['meeting_name']
+			: $this->title($file->getName());
+		unset($meta['meeting_name']);
+
+		return $meta + [
+			'session_id' => $this->sessionId($file),
+			'room_name' => $name,
+			'has_transcript' => true,
+		];
+	}
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	private function fromYaml(string $head): ?array {
+		$end = strpos($head, "\n---", 3);
+		$block = $end === false ? $head : substr($head, 3, $end - 3);
+
+		$scalars = [];
+		$participants = [];
+		$listKey = '';
+		foreach (explode("\n", $block) as $line) {
+			// A list item belongs to whichever key introduced it.
+			if (preg_match('/^\s+-\s+(.+)$/u', $line, $item)) {
+				if ($listKey === 'participants') {
+					$participants[] = trim($item[1], " \"\'");
+				}
+				continue;
+			}
+			if (preg_match('/^(\w+):\s*(.*)$/u', $line, $pair)) {
+				$listKey = $pair[1];
+				if ($pair[2] !== '') {
+					$scalars[$pair[1]] = trim($pair[2], " \"\'");
+				}
+			}
+		}
+
+		// The minutes carry the same shape of header, so the presence of a
+		// meeting name is not enough to call this a transcript; the marker is
+		// that it describes a call at all.
+		if (!isset($scalars['started_at']) && !isset($scalars['date'])) {
+			return null;
+		}
+
+		$start = strtotime($scalars['started_at'] ?? $scalars['date'] ?? '') ?: 0;
+		$end = strtotime($scalars['finished_at'] ?? '') ?: 0;
 
 		return [
-			'session_id' => $this->sessionId($file),
-			'room_name' => $this->title($name),
+			'call_start_ts' => $start,
+			'call_end_ts' => $end > $start ? $end : 0,
+			'participants' => $participants,
+			'meeting_name' => $scalars['meeting_name'] ?? '',
+		];
+	}
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	private function fromLegacyHeader(string $head): ?array {
+		[$start, $end] = $this->period($head);
+		return [
 			'call_start_ts' => $start,
 			'call_end_ts' => $end,
 			'participants' => $this->participants($head),
-			'has_transcript' => true,
+			'meeting_name' => '',
 		];
 	}
 

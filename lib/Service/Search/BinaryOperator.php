@@ -23,4 +23,12 @@ class BinaryOperator extends Operator implements ISearchBinaryOperator {
 	public function getArguments(): array {
 		return $this->arguments;
 	}
+
+	/** See the note in Comparison: required in practice, absent from the interface. */
+	public function __toString(): string {
+		if ($this->type === ISearchBinaryOperator::OPERATOR_NOT) {
+			return 'not ' . $this->arguments[0];
+		}
+		return '(' . implode(' ' . $this->type . ' ', $this->arguments) . ')';
+	}
 }
