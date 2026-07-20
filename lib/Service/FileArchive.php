@@ -8,27 +8,29 @@ use OCP\AppFramework\Http;
 use OCP\Files\File;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
-use OCP\Files\NotFoundException;
 use Psr\Log\LoggerInterface;
 
 /**
- * The archive, read from the user's own files.
+ * The archive, read from the files that already exist.
  *
- * Meetings are folders holding summary.md and transcript.md, shared with the
- * people who were in the call. That means access control is Nextcloud's, not
- * ours: this class searches the *caller's* folder, so a meeting they were not
- * given cannot be found here — there is no check to forget, and no way to widen
- * it by accident.
+ * The transcription service writes two markdown files per call — the
+ * transcript, and the minutes produced by the analyser — and shares them with
+ * the people who were on the call. This class reads exactly that, in exactly
+ * that format. Nothing here asks the service to change, and nothing requires a
+ * migration: the archive on screen is the archive on disk today.
  *
- * Files are located by system tag rather than by path. A share lands wherever
- * the recipient moved it, and people do move things; the tag survives that,
- * a hardcoded folder name does not.
+ * Access control is therefore Nextcloud's. The search runs against the
+ * *caller's* own files, so a call that was never shared with them cannot be
+ * found here — there is no rule to enforce and none to forget.
+ *
+ * Files are recognised by their header rather than by their location, because
+ * a share lands wherever the recipient moved it. The pairing between a
+ * transcript and its minutes is the timestamp both filenames start with, which
+ * is what the service already puts there.
  */
 class FileArchive {
-	public const TAG = 'Meeting transcript';
-
-	private const SUMMARY = 'summary.md';
-	private const TRANSCRIPT = 'transcript.md';
+	private const HEADER = '# Транскрипция:';
+	private const MINUTES_MARKER = 'Протокол';
 
 	public function __construct(
 		private IRootFolder $rootFolder,
@@ -37,160 +39,216 @@ class FileArchive {
 	}
 
 	/**
-	 * Meetings this person can see, newest first.
+	 * Calls this person can see, newest first.
 	 *
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0): array {
 		$meetings = [];
-		foreach ($this->summaries($userId) as $summary) {
-			$meta = $this->metadata($summary);
+		foreach ($this->markdownFiles($userId) as $file) {
+			$meta = $this->transcriptMetadata($file);
 			if ($meta !== null) {
 				$meetings[] = $meta;
 			}
 		}
 
-		// Newest first: the call people look for is almost always a recent one.
-		usort($meetings, static fn ($a, $b) => ($b['call_start_ts'] ?? 0) <=> ($a['call_start_ts'] ?? 0));
-		return array_slice($meetings, $offset, $limit);
+		usort($meetings, static fn ($a, $b) => $b['sort_key'] <=> $a['sort_key']);
+		return array_map(
+			static function (array $m) {
+				unset($m['sort_key']);
+				return $m;
+			},
+			array_slice($meetings, $offset, $limit),
+		);
 	}
 
 	/**
+	 * The minutes: what people open, when the analyser has produced them.
+	 *
 	 * @throws BackendException
 	 */
 	public function summary(string $userId, string $sessionId): string {
-		return $this->read($userId, $sessionId, self::SUMMARY);
+		$transcript = $this->fileFor($userId, $sessionId);
+		$prefix = $this->timestampPrefix($transcript->getName());
+
+		foreach ($this->markdownFiles($userId) as $candidate) {
+			$name = $candidate->getName();
+			if ($candidate->getId() === $transcript->getId()
+				|| !str_contains($name, self::MINUTES_MARKER)
+				|| $this->timestampPrefix($name) !== $prefix) {
+				continue;
+			}
+			return $this->contents($candidate);
+		}
+
+		// A call that was transcribed but never analysed is a normal state, not
+		// an error: the analyser runs after the fact and can be turned off.
+		return '';
 	}
 
 	/**
 	 * @throws BackendException
 	 */
 	public function transcript(string $userId, string $sessionId): string {
-		return $this->read($userId, $sessionId, self::TRANSCRIPT);
+		return $this->contents($this->fileFor($userId, $sessionId));
 	}
 
 	/**
 	 * @throws BackendException
 	 */
-	private function read(string $userId, string $sessionId, string $name): string {
-		foreach ($this->summaries($userId) as $summary) {
-			$meta = $this->metadata($summary);
-			if (($meta['session_id'] ?? null) !== $sessionId) {
-				continue;
-			}
-			try {
-				$folder = $summary->getParent();
-				$file = $folder->get($name);
-				return (string)$file->getContent();
-			} catch (NotFoundException) {
-				// transcript.md may legitimately be absent — a call where
-				// nobody spoke produces a summary and nothing else.
-				return '';
-			} catch (\Throwable $e) {
-				$this->logger->error('could not read {name} for {session}', [
-					'name' => $name, 'session' => $sessionId, 'exception' => $e,
-				]);
-				throw new BackendException('could not read the meeting',
-					Http::STATUS_SERVICE_UNAVAILABLE);
+	private function fileFor(string $userId, string $sessionId): File {
+		foreach ($this->markdownFiles($userId) as $file) {
+			if ($this->sessionId($file) === $sessionId) {
+				return $file;
 			}
 		}
 
-		// Not "no access" — from here the two are the same thing, and saying so
-		// would confirm the meeting exists to someone who cannot open it.
+		// Not "no access" — from here the two are indistinguishable, and
+		// distinguishing them would confirm the call exists to someone who
+		// cannot open it.
 		throw new BackendException('not found', Http::STATUS_NOT_FOUND);
+	}
+
+	/**
+	 * A stable handle for a call.
+	 *
+	 * The file id is Nextcloud's own and survives renaming and moving, which
+	 * both happen: people tidy their shares.
+	 */
+	private function sessionId(File $file): string {
+		return (string)$file->getId();
 	}
 
 	/**
 	 * @return File[]
 	 */
-	private function summaries(string $userId): array {
+	private function markdownFiles(string $userId): array {
 		try {
 			$userFolder = $this->rootFolder->getUserFolder($userId);
-			$found = $userFolder->searchBySystemTag(self::TAG, $userId);
+			$found = $userFolder->searchByMime('text/markdown');
 		} catch (\Throwable $e) {
+			// Show nothing rather than everything, and say why in the log.
 			$this->logger->error('could not search the archive for {user}', [
 				'user' => $userId, 'exception' => $e,
 			]);
 			return [];
 		}
 
-		// Only summaries: the tag sits on every file in the meeting folder, and
-		// counting transcript.md too would list each meeting twice.
 		return array_values(array_filter(
 			$found,
-			static fn (Node $node) => $node instanceof File
-				&& $node->getName() === self::SUMMARY,
+			static fn (Node $node) => $node instanceof File,
 		));
 	}
 
 	/**
-	 * Read the YAML front matter a summary carries.
+	 * Read what the transcript's own header states.
 	 *
-	 * Only the head of the file is parsed: the body is the summary itself and
-	 * can be long, and a listing that read every body in full would load the
-	 * whole archive to draw one screen.
+	 * Only the head of the file is read: the body is the conversation and can
+	 * be long, and drawing one screen must not mean loading the whole archive.
 	 *
-	 * @return array<string, mixed>|null null when the file has no usable header
+	 * @return array<string, mixed>|null null when this is not a transcript
 	 */
-	private function metadata(File $node): ?array {
+	private function transcriptMetadata(File $file): ?array {
+		$head = $this->head($file);
+		if ($head === null || !str_starts_with(ltrim($head), self::HEADER)) {
+			return null;
+		}
+
+		$name = $file->getName();
+		[$start, $end] = $this->period($head);
+
+		return [
+			'session_id' => $this->sessionId($file),
+			'room_name' => $this->title($name),
+			'call_start_ts' => $start,
+			'call_end_ts' => $end,
+			'participants' => $this->participants($head),
+			'has_transcript' => true,
+			// Filenames start with the timestamp, so they sort chronologically
+			// even for the older files whose header lacks a usable date.
+			'sort_key' => $start > 0 ? (string)$start : $name,
+		];
+	}
+
+	private function head(File $file): ?string {
 		try {
-			$handle = $node->fopen('r');
+			$handle = $file->fopen('r');
 			if ($handle === false) {
 				return null;
 			}
-			$head = fread($handle, 4096);
+			$head = fread($handle, 2048);
 			fclose($handle);
+			return is_string($head) ? $head : null;
 		} catch (\Throwable $e) {
 			$this->logger->warning('could not read the header of {path}', [
-				'path' => $node->getPath(), 'exception' => $e,
+				'path' => $file->getPath(), 'exception' => $e,
 			]);
 			return null;
 		}
+	}
 
-		if (!is_string($head) || !str_starts_with(ltrim($head), '---')) {
-			return null;
+	/**
+	 * @throws BackendException
+	 */
+	private function contents(File $file): string {
+		try {
+			return (string)$file->getContent();
+		} catch (\Throwable $e) {
+			$this->logger->error('could not read {path}', [
+				'path' => $file->getPath(), 'exception' => $e,
+			]);
+			throw new BackendException('could not read the call',
+				Http::STATUS_SERVICE_UNAVAILABLE);
 		}
-		$body = substr(ltrim($head), 3);
-		$end = strpos($body, "\n---");
-		if ($end === false) {
-			return null;
+	}
+
+	/**
+	 * "Дата: 2026-03-05 14:49 — 14:51" as a pair of timestamps.
+	 *
+	 * @return array{0: int, 1: int}
+	 */
+	private function period(string $head): array {
+		if (!preg_match('/^Дата:\s*(\S+)\s+(\d{2}:\d{2})(?:\s*[—-]\s*(\d{2}:\d{2}))?/mu',
+			$head, $m)) {
+			return [0, 0];
 		}
 
-		$meta = [];
-		foreach (explode("\n", substr($body, 0, $end)) as $line) {
-			$parts = explode(':', trim($line), 2);
-			if (count($parts) !== 2) {
-				continue;
-			}
-			$meta[trim($parts[0])] = trim($parts[1]);
-		}
+		$start = strtotime($m[1] . ' ' . $m[2]);
+		$end = isset($m[3]) ? strtotime($m[1] . ' ' . $m[3]) : false;
 
-		if (!isset($meta['session_id'])) {
-			// Without an id the meeting cannot be addressed, so it is not one.
-			return null;
+		// A call that crosses midnight ends "before" it starts by this reading;
+		// treating that as a negative duration would show nonsense, so drop it.
+		if ($end !== false && $start !== false && $end < $start) {
+			$end = false;
 		}
-
-		return [
-			'session_id' => (string)$meta['session_id'],
-			'room_name' => (string)($meta['room'] ?? ''),
-			'call_start_ts' => (int)($meta['start_ts'] ?? 0),
-			'call_end_ts' => (int)($meta['end_ts'] ?? 0),
-			'participants' => $this->listValue($meta['participants'] ?? ''),
-			'has_transcript' => ($meta['has_transcript'] ?? 'true') !== 'false',
-		];
+		return [$start ?: 0, $end ?: 0];
 	}
 
 	/**
 	 * @return string[]
 	 */
-	private function listValue(string $raw): array {
-		$raw = trim($raw, " \t[]");
-		if ($raw === '') {
+	private function participants(string $head): array {
+		if (!preg_match('/^Участники:\s*(.+)$/mu', $head, $m)) {
 			return [];
 		}
-		return array_values(array_filter(array_map(
-			static fn ($v) => trim($v, " \"'"),
-			explode(',', $raw),
-		)));
+		return array_values(array_filter(array_map('trim', explode(',', $m[1]))));
+	}
+
+	/**
+	 * The part of the filename people recognise, without the timestamp it
+	 * starts with.
+	 */
+	private function title(string $name): string {
+		$name = preg_replace('/\.md$/u', '', $name);
+		$parts = explode(' - ', $name, 2);
+		return trim($parts[1] ?? $parts[0]);
+	}
+
+	/**
+	 * The timestamp a filename starts with, which is what pairs a transcript
+	 * with its minutes.
+	 */
+	private function timestampPrefix(string $name): string {
+		return preg_match('/^([\d-]{10}(?:\s[\d-]{8})?)/u', $name, $m) ? $m[1] : '';
 	}
 }

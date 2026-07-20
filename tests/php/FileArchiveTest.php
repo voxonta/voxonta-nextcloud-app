@@ -24,131 +24,163 @@ use Psr\Log\LoggerInterface;
  * one mistake that would quietly turn this into an archive-wide reader.
  */
 class FileArchiveTest extends TestCase {
-	private const HEADER = "---\nsession_id: s1\nroom: Standup\n"
-		. "start_ts: 1000\nend_ts: 1900\n"
-		. "participants: [alice, bob]\n---\n\nWhat was decided.\n";
+	private const TRANSCRIPT = "# Транскрипция: [\"alice\",\"bob\"]\n"
+		. "Дата: 2026-03-05 14:49 — 15:04\n"
+		. "Участники: Вадим Куницын, Алексей Морозов\n\n---\n\n"
+		. "[00:05] **Вадим Куницын:** что решаем\n";
+
+	private const MINUTES = "# Протокол\n\nРешили выкатывать.\n";
 
 	/**
-	 * @param array<string, string> $files name => content, as one meeting folder
+	 * Build an archive over the given files, exactly as they exist in
+	 * Nextcloud today: markdown in a shared folder, no tags, no front matter.
+	 *
+	 * @param array<string, string> $files filename => content
 	 */
 	private function archive(array $files, ?string &$searchedFor = null,
 		bool $searchThrows = false): FileArchive {
-		$folder = $this->createMock(Folder::class);
-		$folder->method('get')->willReturnCallback(
-			function (string $name) use ($files) {
-				if (!isset($files[$name])) {
-					throw new NotFoundException($name);
-				}
-				$node = $this->createMock(File::class);
-				$node->method('getContent')->willReturn($files[$name]);
-				return $node;
-			});
-
-		$summary = $this->createMock(File::class);
-		$summary->method('getName')->willReturn('summary.md');
-		$summary->method('getParent')->willReturn($folder);
-		$summary->method('fopen')->willReturnCallback(
-			static function () use ($files) {
-				$handle = fopen('php://memory', 'r+');
-				fwrite($handle, $files['summary.md'] ?? '');
-				rewind($handle);
-				return $handle;
-			});
+		$nodes = [];
+		$id = 100;
+		foreach ($files as $name => $content) {
+			$file = $this->createMock(File::class);
+			$file->method('getName')->willReturn($name);
+			$file->method('getId')->willReturn($id++);
+			$file->method('getContent')->willReturn($content);
+			$file->method('fopen')->willReturnCallback(
+				static function () use ($content) {
+					$handle = fopen('php://memory', 'r+');
+					fwrite($handle, $content);
+					rewind($handle);
+					return $handle;
+				});
+			$nodes[] = $file;
+		}
 
 		$userFolder = $this->createMock(Folder::class);
-		$userFolder->method('searchBySystemTag')->willReturnCallback(
-			function (string $tag, string $user) use ($summary, &$searchedFor, $searchThrows) {
-				$searchedFor = $user;
+		$userFolder->method('searchByMime')->willReturnCallback(
+			function (string $mime) use ($nodes, $searchThrows) {
 				if ($searchThrows) {
 					throw new \RuntimeException('storage unavailable');
 				}
-				return [$summary];
+				return $nodes;
 			});
 
 		$root = $this->createMock(IRootFolder::class);
-		$root->method('getUserFolder')->willReturn($userFolder);
+		$root->method('getUserFolder')->willReturnCallback(
+			function (string $user) use ($userFolder, &$searchedFor) {
+				$searchedFor = $user;
+				return $userFolder;
+			});
 
 		return new FileArchive($root, $this->createMock(LoggerInterface::class));
 	}
 
-	public function testTheSearchRunsAgainstTheCallersOwnFolder(): void {
+	private function transcriptFile(): array {
+		return ['2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT];
+	}
+
+	public function testTheSearchRunsAgainstTheCallersOwnFiles(): void {
 		$searched = null;
-		$archive = $this->archive(['summary.md' => self::HEADER], $searched);
+		$archive = $this->archive($this->transcriptFile(), $searched);
 
 		$archive->list('alice');
 
 		$this->assertSame('alice', $searched,
-			'searching as anyone else would return meetings the caller was '
+			'searching anyone else\'s files would return calls the caller was '
 			. 'never given');
 	}
 
-	public function testMetadataComesFromTheFrontMatter(): void {
-		$archive = $this->archive(['summary.md' => self::HEADER]);
+	public function testMetadataComesFromTheTranscriptHeader(): void {
+		$archive = $this->archive($this->transcriptFile());
 
 		$meetings = $archive->list('alice');
 
 		$this->assertCount(1, $meetings);
-		$this->assertSame('s1', $meetings[0]['session_id']);
-		$this->assertSame('Standup', $meetings[0]['room_name']);
-		$this->assertSame(1000, $meetings[0]['call_start_ts']);
-		$this->assertSame(['alice', 'bob'], $meetings[0]['participants']);
+		$this->assertSame('Вадим Куницын', $meetings[0]['room_name']);
+		$this->assertSame(['Вадим Куницын', 'Алексей Морозов'],
+			$meetings[0]['participants']);
+		$this->assertSame(15 * 60,
+			$meetings[0]['call_end_ts'] - $meetings[0]['call_start_ts']);
 	}
 
-	public function testAFileWithoutAHeaderIsNotAMeeting(): void {
-		$archive = $this->archive(['summary.md' => "Just some notes.\n"]);
+	public function testMarkdownThatIsNotATranscriptIsIgnored(): void {
+		$archive = $this->archive([
+			'Shopping list.md' => "# Milk\n",
+			'Readme.md' => "Some notes\n",
+		]);
 
 		$this->assertSame([], $archive->list('alice'),
-			'a stray summary.md in someone\'s files must not become a meeting');
+			'the user\'s own markdown must not appear as calls');
 	}
 
-	public function testTheSummaryIsReadable(): void {
-		$archive = $this->archive(['summary.md' => self::HEADER]);
+	public function testTheTranscriptIsReadable(): void {
+		$archive = $this->archive($this->transcriptFile());
+		$id = $archive->list('alice')[0]['session_id'];
 
-		$this->assertStringContainsString('What was decided.',
-			$archive->summary('alice', 's1'));
+		$this->assertStringContainsString('что решаем',
+			$archive->transcript('alice', $id));
 	}
 
-	public function testAnUnknownMeetingIsNotFound(): void {
-		$archive = $this->archive(['summary.md' => self::HEADER]);
+	public function testTheMinutesArePairedByTimestamp(): void {
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+			'2026-03-05 14-49-00 - Протокол Вадим Куницын.md' => self::MINUTES,
+		]);
+		$id = $archive->list('alice')[0]['session_id'];
 
-		$this->expectException(BackendException::class);
-		$archive->summary('alice', 'someone-elses-session');
+		$this->assertStringContainsString('Решили выкатывать',
+			$archive->summary('alice', $id));
 	}
 
-	public function testARefusalDoesNotDistinguishMissingFromForbidden(): void {
-		$archive = $this->archive(['summary.md' => self::HEADER]);
+	public function testMinutesFromADifferentCallAreNotPickedUp(): void {
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+			'2026-03-06 09-00-00 - Протокол Вадим Куницын.md' => self::MINUTES,
+		]);
+		$id = $archive->list('alice')[0]['session_id'];
+
+		$this->assertSame('', $archive->summary('alice', $id),
+			'pairing on anything looser than the timestamp attaches the wrong '
+			. 'minutes to a call');
+	}
+
+	public function testACallWithoutMinutesStillOpens(): void {
+		// Transcribed but not analysed is a normal state, not an error.
+		$archive = $this->archive($this->transcriptFile());
+		$id = $archive->list('alice')[0]['session_id'];
+
+		$this->assertSame('', $archive->summary('alice', $id));
+	}
+
+	public function testAnUnknownCallIsNotFound(): void {
+		$archive = $this->archive($this->transcriptFile());
 
 		try {
-			$archive->summary('alice', 'someone-elses-session');
+			$archive->transcript('alice', '999999');
 			$this->fail('expected a refusal');
 		} catch (BackendException $e) {
 			$this->assertSame(Http::STATUS_NOT_FOUND, $e->getStatus(),
-				'anything but 404 tells the caller the meeting exists');
+				'anything but 404 tells the caller the call exists');
 		}
-	}
-
-	public function testACallWhereNobodySpokeStillOpens(): void {
-		// summary.md but no transcript.md: a real outcome, not an error.
-		$archive = $this->archive(['summary.md' => self::HEADER]);
-
-		$this->assertSame('', $archive->transcript('alice', 's1'));
 	}
 
 	public function testAFailingSearchShowsNothingRatherThanEverything(): void {
 		$searched = null;
-		$archive = $this->archive(['summary.md' => self::HEADER], $searched, true);
+		$archive = $this->archive($this->transcriptFile(), $searched, true);
 
 		$this->assertSame([], $archive->list('alice'));
 	}
 
-	public function testOnlySummaryFilesBecomeMeetings(): void {
-		// The tag sits on the folder's files; transcript.md carries it too, and
-		// counting both would list every meeting twice.
+	public function testNewestCallsComeFirst(): void {
+		$older = str_replace('2026-03-05 14:49', '2026-03-01 09:00', self::TRANSCRIPT);
 		$archive = $this->archive([
-			'summary.md' => self::HEADER,
-			'transcript.md' => "---\nsession_id: s1\n---\n",
+			'2026-03-01 09-00-00 - Старый звонок.md' => $older,
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
 		]);
 
-		$this->assertCount(1, $archive->list('alice'));
+		$meetings = $archive->list('alice');
+
+		$this->assertSame('Вадим Куницын', $meetings[0]['room_name'],
+			'the call people look for is almost always a recent one');
 	}
 }
