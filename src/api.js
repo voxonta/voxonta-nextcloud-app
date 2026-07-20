@@ -1,12 +1,10 @@
 /**
- * Talking to the service that stores the transcripts.
+ * Reading meetings.
  *
- * Requests do not go straight there: they pass through this app, which holds
- * the credentials. The browser never sees the service token — a user opening
- * devtools should not walk away with the key to every meeting in the company.
- *
- * The app also scopes the answer to whoever is asking. The service isolates by
- * tenant, not by user, so that filter exists only on the server side.
+ * Meetings are files in the user's own Nextcloud, so these endpoints carry no
+ * notion of "whose" — the server reads the caller's files and can return
+ * nothing else. There is no token here and no service to reach: what a person
+ * sees is what has been shared with them.
  */
 
 import { generateUrl } from '@nextcloud/router'
@@ -27,75 +25,44 @@ async function request(path, { signal } = {}) {
 }
 
 /**
- * Meetings, newest first.
+ * Meetings this person can see, newest first.
  *
- * @param {object} options filtering and paging
+ * No user or scope parameter: the server reads the caller's own files, so the
+ * question "whose meetings" has only one possible answer.
+ *
+ * @param {object} options paging
  * @param {number} [options.limit] how many to return
  * @param {number} [options.offset] where to start
- * @param {string} [options.scope] 'mine' or 'all' for the whole archive
- * @param {AbortSignal} [options.signal] to cancel a superseded search
- * @return {Promise<{meetings: object[], canSeeEverything: boolean}>}
- */
-export async function fetchMeetings({ limit = 50, offset = 0, scope = 'mine', signal } = {}) {
-	// No user parameter: the server derives it from the session and ignores
-	// anything sent from here, so offering it would only invite the idea that
-	// asking for someone else's meetings is a supported thing to do.
-	//
-	// scope=all is a request for the whole archive, which the server grants
-	// only to accounts allowed it — asking without the right returns your own
-	// meetings rather than an error.
-	const params = new URLSearchParams({ limit, offset, scope })
-	const data = await request(`/meetings?${params}`, { signal })
-	return {
-		meetings: data.meetings || [],
-		canSeeEverything: !!data.can_see_everything,
-	}
-}
-
-/**
- * One meeting's metadata.
- *
- * @param {string} sessionId meeting id
- * @return {Promise<object>}
- */
-export function fetchMeeting(sessionId) {
-	return request(`/meetings/${encodeURIComponent(sessionId)}`)
-}
-
-/**
- * The transcript itself — who said what, in order.
- *
- * @param {string} sessionId meeting id
- * @return {Promise<object>}
- */
-export function fetchTranscript(sessionId) {
-	return request(`/meetings/${encodeURIComponent(sessionId)}/transcript`)
-}
-
-/**
- * Analysis artefacts: summary, decisions, action items.
- *
- * Absent for a meeting that was only transcribed, and for one whose analysis is
- * still running — the caller distinguishes those by the meeting's
- * analysis_status rather than by an empty list here.
- *
- * @param {string} sessionId meeting id
+ * @param {AbortSignal} [options.signal] to cancel a superseded request
  * @return {Promise<object[]>}
  */
-export async function fetchAnalysis(sessionId) {
-	const data = await request(`/meetings/${encodeURIComponent(sessionId)}/analysis`)
-	return data.artifacts || []
+export async function fetchMeetings({ limit = 50, offset = 0, signal } = {}) {
+	const params = new URLSearchParams({ limit, offset })
+	const data = await request(`/meetings?${params}`, { signal })
+	return data.meetings || []
 }
 
 /**
- * One analysis artefact, rendered as markdown by the backend.
+ * The summary: what people open, and usually all they read.
  *
  * @param {string} sessionId meeting id
- * @param {string} name artefact name
- * @return {Promise<object>}
+ * @return {Promise<string>} markdown
  */
-export function fetchArtifact(sessionId, name) {
-	return request(
-		`/meetings/${encodeURIComponent(sessionId)}/analysis/${encodeURIComponent(name)}`,
-	)
+export async function fetchSummary(sessionId) {
+	const data = await request(`/meetings/${encodeURIComponent(sessionId)}/summary`)
+	return data.content || ''
+}
+
+/**
+ * The verbatim transcript.
+ *
+ * Fetched only when asked for: it is the larger of the two files, and most
+ * visits never need it.
+ *
+ * @param {string} sessionId meeting id
+ * @return {Promise<string>} markdown
+ */
+export async function fetchTranscript(sessionId) {
+	const data = await request(`/meetings/${encodeURIComponent(sessionId)}/transcript`)
+	return data.content || ''
 }

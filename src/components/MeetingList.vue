@@ -53,7 +53,7 @@
 					{{ when(meeting) }} · {{ people(meeting) }}
 				</template>
 				<template #indicator>
-					<CheckIcon v-if="meeting.analysis_status === 'ready'" :size="16" />
+					<TextIcon v-if="meeting.has_transcript" :size="16" />
 				</template>
 			</NcListItem>
 		</ul>
@@ -75,7 +75,7 @@ import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
 import NcListItem from '@nextcloud/vue/dist/Components/NcListItem.js'
 import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
-import CheckIcon from 'vue-material-design-icons/CheckCircle.vue'
+import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
 import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
 import { fetchMeetings } from '../api.js'
 
@@ -90,7 +90,7 @@ export default {
 		NcListItem,
 		NcLoadingIcon,
 		AlertIcon,
-		CheckIcon,
+		TextIcon,
 		MicrophoneIcon,
 	},
 
@@ -98,10 +98,6 @@ export default {
 		selectedId: {
 			type: String,
 			default: '',
-		},
-		scope: {
-			type: String,
-			default: 'mine',
 		},
 	},
 
@@ -125,17 +121,14 @@ export default {
 			this.loading = true
 			this.error = ''
 			try {
-				const data = await fetchMeetings({ limit: PAGE, scope: this.scope })
-				this.meetings = data.meetings
-				this.hasMore = data.meetings.length === PAGE
-				// Only the server can answer this, and the answer decides
-				// whether the wider view is offered at all.
-				this.$emit('access', data.canSeeEverything)
+				const meetings = await fetchMeetings({ limit: PAGE })
+				this.meetings = meetings
+				this.hasMore = meetings.length === PAGE
 			} catch (e) {
 				// Say what happened rather than showing an empty list — an
 				// empty list reads as "you have no meetings", which is a
 				// different and misleading statement.
-				this.error = t('done_transcription', 'The transcription service may be unavailable.')
+				this.error = t('done_transcription', 'Please try again.')
 				console.error('failed to load meetings', e)
 			} finally {
 				this.loading = false
@@ -144,13 +137,12 @@ export default {
 
 		async loadMore() {
 			try {
-				const data = await fetchMeetings({
+				const older = await fetchMeetings({
 					limit: PAGE,
 					offset: this.meetings.length,
-					scope: this.scope,
 				})
-				this.meetings = this.meetings.concat(data.meetings)
-				this.hasMore = data.meetings.length === PAGE
+				this.meetings = this.meetings.concat(older)
+				this.hasMore = older.length === PAGE
 			} catch (e) {
 				console.error('failed to load older meetings', e)
 			}

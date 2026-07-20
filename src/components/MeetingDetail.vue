@@ -1,90 +1,103 @@
 <!--
-	One meeting: the summary, and the transcript underneath.
+	One meeting: the summary, with the transcript a click away.
 
-	The summary comes first because that is what people actually came for — the
-	transcript is what you open when the summary raised a question. Both are
-	shown, neither is hidden behind a click.
+	The order reflects how these are used. People open a meeting to find out
+	what was decided, and the summary answers that; the verbatim transcript is
+	where they go when the summary left a question — checking a number, finding
+	who committed to what, seeing the exact wording. Showing both at once buries
+	the answer under the evidence, and loads the larger file on every visit for
+	the minority of cases that want it.
 
-	Transcript rendering groups consecutive lines from the same speaker. Raw
-	segments arrive every few seconds, and printing a name above each one turns a
-	two-minute answer into a wall of repeated labels.
+	So the transcript is fetched only when asked for, and stays open once it is:
+	somebody reading it will scroll back and forth.
 -->
 <template>
 	<div class="meeting-detail">
 		<header class="meeting-detail__header">
 			<h2>{{ meeting.room_name || t('done_transcription', 'Untitled call') }}</h2>
 			<p class="meeting-detail__meta">
-				{{ formattedDate }} · {{ formattedDuration }} ·
-				{{ (meeting.participants || []).join(', ') }}
+				{{ formattedDate }}
+				<template v-if="formattedDuration"> · {{ formattedDuration }}</template>
+				<template v-if="participants"> · {{ participants }}</template>
 			</p>
 		</header>
 
-		<section v-if="analysisState === 'ready'" class="meeting-detail__section">
-			<h3>{{ t('done_transcription', 'Summary') }}</h3>
-			<div v-for="artifact in artifacts" :key="artifact.name" class="meeting-detail__artifact">
-				<h4>{{ prettyName(artifact.name) }}</h4>
-				<div class="meeting-detail__markdown" v-text="artifact.content" />
-			</div>
-		</section>
-
-		<section v-else-if="analysisState === 'running'" class="meeting-detail__section">
-			<h3>{{ t('done_transcription', 'Summary') }}</h3>
-			<p class="meeting-detail__note">
-				<NcLoadingIcon :size="16" class="meeting-detail__inline-icon" />
-				{{ t('done_transcription', 'The summary is being prepared. The transcript below is complete.') }}
-			</p>
-		</section>
-
 		<section class="meeting-detail__section">
-			<h3>{{ t('done_transcription', 'Transcript') }}</h3>
-
-			<NcLoadingIcon v-if="loadingTranscript" :size="24" />
+			<NcLoadingIcon v-if="loadingSummary" :size="24" />
 
 			<NcEmptyContent
-				v-else-if="transcriptError"
-				:name="t('done_transcription', 'Could not load the transcript.')">
+				v-else-if="summaryError"
+				:name="t('done_transcription', 'Could not load the summary.')">
 				<template #icon>
 					<AlertIcon />
 				</template>
 			</NcEmptyContent>
 
-			<NcEmptyContent
-				v-else-if="!blocks.length"
-				:name="t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.')">
-				<template #icon>
-					<MicrophoneOffIcon />
-				</template>
-			</NcEmptyContent>
+			<NcRichText v-else :text="summary" :use-extended-markdown="true" />
+		</section>
 
-			<div v-else class="meeting-detail__transcript">
-				<div v-for="(block, index) in blocks" :key="index" class="meeting-detail__block">
-					<div class="meeting-detail__speaker">
-						{{ block.speaker }}
-						<span class="meeting-detail__time">{{ stamp(block.time) }}</span>
-					</div>
-					<p class="meeting-detail__text">{{ block.text }}</p>
-				</div>
-			</div>
+		<section class="meeting-detail__section">
+			<NcButton
+				v-if="!transcriptShown"
+				:disabled="!meeting.has_transcript"
+				@click="showTranscript">
+				<template #icon>
+					<TextIcon :size="20" />
+				</template>
+				{{ meeting.has_transcript
+					? t('done_transcription', 'Show transcript')
+					: t('done_transcription', 'No transcript for this call') }}
+			</NcButton>
+
+			<template v-else>
+				<h3>{{ t('done_transcription', 'Transcript') }}</h3>
+
+				<NcLoadingIcon v-if="loadingTranscript" :size="24" />
+
+				<NcEmptyContent
+					v-else-if="transcriptError"
+					:name="t('done_transcription', 'Could not load the transcript.')">
+					<template #icon>
+						<AlertIcon />
+					</template>
+				</NcEmptyContent>
+
+				<NcEmptyContent
+					v-else-if="!transcript"
+					:name="t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.')">
+					<template #icon>
+						<MicrophoneOffIcon />
+					</template>
+				</NcEmptyContent>
+
+				<NcRichText v-else :text="transcript" :use-extended-markdown="true" />
+			</template>
 		</section>
 	</div>
 </template>
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
 import NcEmptyContent from '@nextcloud/vue/dist/Components/NcEmptyContent.js'
 import NcLoadingIcon from '@nextcloud/vue/dist/Components/NcLoadingIcon.js'
+import NcRichText from '@nextcloud/vue/dist/Components/NcRichText.js'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
 import MicrophoneOffIcon from 'vue-material-design-icons/MicrophoneOff.vue'
-import { fetchAnalysis, fetchArtifact, fetchTranscript } from '../api.js'
+import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
+import { fetchSummary, fetchTranscript } from '../api.js'
 
 export default {
 	name: 'MeetingDetail',
 
 	components: {
+		NcButton,
 		NcEmptyContent,
 		NcLoadingIcon,
+		NcRichText,
 		AlertIcon,
 		MicrophoneOffIcon,
+		TextIcon,
 	},
 
 	props: {
@@ -96,18 +109,17 @@ export default {
 
 	data() {
 		return {
-			blocks: [],
-			artifacts: [],
-			loadingTranscript: true,
-			transcriptError: '',
+			summary: '',
+			transcript: '',
+			loadingSummary: true,
+			loadingTranscript: false,
+			transcriptShown: false,
+			summaryError: false,
+			transcriptError: false,
 		}
 	},
 
 	computed: {
-		analysisState() {
-			return this.meeting.analysis_status || 'none'
-		},
-
 		formattedDate() {
 			if (!this.meeting.call_start_ts) {
 				return ''
@@ -128,101 +140,72 @@ export default {
 					minutes: minutes % 60,
 				})
 		},
+
+		participants() {
+			return (this.meeting.participants || []).join(', ')
+		},
 	},
 
 	watch: {
-		// Switching meetings must not leave the previous transcript on screen.
+		// Switching meetings must not leave the previous one on screen, and must
+		// not carry over the previous transcript — including the fact that it
+		// was open.
 		'meeting.session_id': {
 			immediate: true,
 			handler() {
-				this.blocks = []
-				this.artifacts = []
-				this.load()
+				this.summary = ''
+				this.transcript = ''
+				this.transcriptShown = false
+				this.transcriptError = false
+				this.loadSummary()
 			},
 		},
 	},
 
 	methods: {
-		async load() {
-			this.loadingTranscript = true
-			this.transcriptError = ''
+		t,
+
+		async loadSummary() {
+			this.loadingSummary = true
+			this.summaryError = false
 			const sessionId = this.meeting.session_id
 
 			try {
-				const data = await fetchTranscript(sessionId)
-				// A late response for a meeting the user already navigated away
+				const text = await fetchSummary(sessionId)
+				// A late answer for a meeting the user already navigated away
 				// from would overwrite what they are reading now.
-				if (this.meeting.session_id !== sessionId) {
-					return
+				if (this.meeting.session_id === sessionId) {
+					this.summary = text
 				}
-				this.blocks = this.group(data.segments || [])
 			} catch (e) {
 				if (this.meeting.session_id === sessionId) {
-					this.transcriptError = t('done_transcription', 'Could not load the transcript.')
+					this.summaryError = true
+				}
+				console.error('failed to load summary', e)
+			} finally {
+				this.loadingSummary = false
+			}
+		},
+
+		async showTranscript() {
+			this.transcriptShown = true
+			this.loadingTranscript = true
+			this.transcriptError = false
+			const sessionId = this.meeting.session_id
+
+			try {
+				const text = await fetchTranscript(sessionId)
+				if (this.meeting.session_id === sessionId) {
+					this.transcript = text
+				}
+			} catch (e) {
+				if (this.meeting.session_id === sessionId) {
+					this.transcriptError = true
 				}
 				console.error('failed to load transcript', e)
 			} finally {
 				this.loadingTranscript = false
 			}
-
-			if (this.analysisState === 'ready') {
-				await this.loadAnalysis(sessionId)
-			}
-		},
-
-		async loadAnalysis(sessionId) {
-			try {
-				const list = await fetchAnalysis(sessionId)
-				const loaded = await Promise.all(
-					list.map(async ({ name }) => ({
-						name,
-						content: (await fetchArtifact(sessionId, name)).content || '',
-					})),
-				)
-				if (this.meeting.session_id === sessionId) {
-					this.artifacts = loaded
-				}
-			} catch (e) {
-				console.error('failed to load analysis', e)
-			}
-		},
-
-		group(segments) {
-			// Consecutive lines from one person become one block: the engine
-			// emits a segment every few seconds, and a name above each of them
-			// makes a long answer unreadable.
-			const blocks = []
-			for (const segment of segments) {
-				const speaker = segment.speaker_name || segment.speaker_id || '—'
-				const last = blocks[blocks.length - 1]
-				if (last && last.speaker === speaker) {
-					last.text += ' ' + segment.text
-				} else {
-					blocks.push({
-						speaker,
-						text: segment.text,
-						time: segment.time || 0,
-					})
-				}
-			}
-			return blocks
-		},
-
-		stamp(seconds) {
-			// Offset from the start of the call, so it can be matched against a
-			// recording or quoted in a message.
-			const total = Math.max(0, Math.round(seconds))
-			const mm = String(Math.floor(total / 60)).padStart(2, '0')
-			const ss = String(total % 60).padStart(2, '0')
-			return `${mm}:${ss}`
-		},
-
-		prettyName(name) {
-			// Artefacts arrive as "01_Executive_Summary.md".
-			return name
-				.replace(/\.md$/, '')
-				.replace(/^\d+[_-]/, '')
-				.replace(/[_-]/g, ' ')
 		},
 	},
 }
@@ -230,64 +213,31 @@ export default {
 
 <style scoped>
 .meeting-detail {
-	padding: 16px 24px;
-	overflow-y: auto;
+	padding: 24px 32px;
+	max-width: 800px;
+}
+
+.meeting-detail__header {
+	border-bottom: 1px solid var(--color-border);
+	padding-bottom: 12px;
+	margin-bottom: 20px;
 }
 
 .meeting-detail__header h2 {
-	margin: 0;
+	margin: 0 0 4px;
 }
 
 .meeting-detail__meta {
 	color: var(--color-text-maxcontrast);
 	font-size: 0.9em;
-	margin-top: 4px;
+	margin: 0;
 }
 
 .meeting-detail__section {
-	margin-top: 24px;
+	margin-bottom: 24px;
 }
 
-.meeting-detail__inline-icon {
-	display: inline-block;
-	vertical-align: middle;
-}
-
-.meeting-detail__note {
-	color: var(--color-text-maxcontrast);
-}
-
-.meeting-detail__note--error {
-	color: var(--color-error);
-}
-
-.meeting-detail__artifact {
-	margin-bottom: 16px;
-}
-
-.meeting-detail__markdown {
-	white-space: pre-wrap;
-	line-height: 1.5;
-}
-
-.meeting-detail__block {
-	margin-bottom: 14px;
-}
-
-.meeting-detail__speaker {
-	font-weight: 600;
-	font-size: 0.9em;
-}
-
-.meeting-detail__time {
-	margin-inline-start: 8px;
-	font-weight: 400;
-	color: var(--color-text-maxcontrast);
-}
-
-.meeting-detail__text {
-	margin: 2px 0 0;
-	line-height: 1.5;
-	white-space: pre-wrap;
+.meeting-detail__section h3 {
+	margin: 0 0 12px;
 }
 </style>

@@ -24,12 +24,9 @@ use OCP\Settings\IDeclarativeSettingsForm;
  * to change an address.
  */
 class AdminSettings implements IDeclarativeSettingsForm {
-	public const KEY_BACKEND_URL = 'backend_url';
-	public const KEY_BACKEND_TOKEN = 'backend_token';
 	public const KEY_ENABLED = 'transcription_enabled';
 	public const KEY_ROOM_ALLOWLIST = 'room_allowlist';
 	public const KEY_PUBLISH_TO_CHAT = 'publish_to_chat';
-	public const KEY_ARCHIVE_GROUPS = 'archive_groups';
 
 	public function __construct(
 		private IL10N $l10n,
@@ -48,21 +45,6 @@ class AdminSettings implements IDeclarativeSettingsForm {
 
 			'fields' => [
 				[
-					'id' => self::KEY_BACKEND_URL,
-					'title' => $this->l('Transcription service address'),
-					'description' => $this->l('Where the service that records and transcribes your calls is reachable, e.g. https://transcribe.example.com'),
-					'type' => DeclarativeSettingsTypes::URL,
-					'placeholder' => 'https://transcribe.example.com',
-					'default' => '',
-				],
-				[
-					'id' => self::KEY_BACKEND_TOKEN,
-					'title' => $this->l('Service token'),
-					'description' => $this->l('Grants access to every meeting in this instance, so it stays on the server and is never sent to the browser.'),
-					'type' => DeclarativeSettingsTypes::PASSWORD,
-					'default' => '',
-				],
-				[
 					'id' => self::KEY_ENABLED,
 					'title' => $this->l('Transcribe calls'),
 					'description' => $this->l('Turn transcription off without uninstalling the app. Calls already running are not interrupted.'),
@@ -75,14 +57,6 @@ class AdminSettings implements IDeclarativeSettingsForm {
 					'description' => $this->l('Comma-separated conversation tokens. Leave empty to transcribe every call. Useful for a pilot: switch it on for one team before rolling it out.'),
 					'type' => DeclarativeSettingsTypes::TEXT,
 					'placeholder' => 'abc123xy, def456uv',
-					'default' => '',
-				],
-				[
-					'id' => self::KEY_ARCHIVE_GROUPS,
-					'title' => $this->l('Who can see the whole archive'),
-					'description' => $this->l('Comma-separated group names, for people who need every call rather than their own — management, HR, audit. Everyone else always sees the meetings they took part in. Leave empty and nobody has this access.'),
-					'type' => DeclarativeSettingsTypes::TEXT,
-					'placeholder' => 'management, hr',
 					'default' => '',
 				],
 				[

@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Listener;
 
 use OCA\DoneTranscription\AppInfo\Application;
-use OCA\DoneTranscription\Service\BackendClient;
-use OCA\DoneTranscription\Service\BackendException;
+use OCA\DoneTranscription\Service\RecordingState;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use OCP\IL10N;
@@ -27,7 +26,7 @@ class BotListener implements IEventListener {
 	private const START = ['/запись', '/record', '/transcribe'];
 
 	public function __construct(
-		private BackendClient $backend,
+		private RecordingState $recordingState,
 		private IL10N $l10n,
 		private LoggerInterface $logger,
 	) {
@@ -65,19 +64,20 @@ class BotListener implements IEventListener {
 		}
 
 		try {
-			$this->backend->post('/v1/rooms/' . rawurlencode($token) . '/recording',
-				['recording' => $recording]);
-		} catch (BackendException $e) {
-			// Say so. Someone who has just asked not to be recorded must not be
-			// left with a silence that reads as "done" — if we could not apply
-			// it, the honest answer is that recording may still be running.
+			// Written before the confirmation is posted: telling the room that
+			// recording stopped and then failing to store it is the one order
+			// of events this must never produce.
+			$this->recordingState->setRecording($token, $recording);
+		} catch (\Throwable $e) {
+			// Someone who has just asked not to be recorded must not be left
+			// with a silence that reads as "done".
 			$this->logger->error('could not apply the recording command in {token}', [
 				'token' => $token,
 				'exception' => $e,
 			]);
 			$event->addAnswer($recording
-				? $this->l10n->t('Could not reach the transcription service, so recording was not resumed.')
-				: $this->l10n->t('Could not reach the transcription service. Recording may still be running — please ask an administrator.'));
+				? $this->l10n->t('Could not resume recording. Please try again.')
+				: $this->l10n->t('Could not stop the recording. It may still be running — please ask an administrator.'));
 			return;
 		}
 
