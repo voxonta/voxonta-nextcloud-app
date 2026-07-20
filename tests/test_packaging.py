@@ -72,3 +72,32 @@ def test_the_release_archive_leaves_development_files_out():
     packed = re.search(r"for item in ([^;]+); do", script).group(1).split()
     for excluded in ("node_modules", "vendor", "src", "tests"):
         assert excluded not in packed, f"{excluded}/ would end up in the archive"
+
+
+def _colours(path: str) -> set[str]:
+    svg = open(os.path.join(ROOT, "img", path), encoding="utf-8").read()
+    return set(re.findall(r"#[0-9a-fA-F]{6}", svg))
+
+
+def test_the_menu_icon_is_light():
+    """Nextcloud puts img/app.svg in the header, and the header is dark. Every
+    shipped app does this — Talk and Files both use fill="#fff". A dark icon
+    there is invisible against the bar, which is exactly how this was found."""
+    assert _colours("app.svg") <= {"#ffffff"}, \
+        "app.svg must be white: it is the icon Nextcloud shows in the dark header"
+
+
+def test_the_light_background_icon_is_dark():
+    """The counterpart, picked up automatically by name for light surfaces."""
+    assert _colours("app-dark.svg") <= {"#000000"}, \
+        "app-dark.svg is used where the background is light and must be dark"
+
+
+def test_the_two_icons_are_the_same_drawing():
+    """They should differ in colour only — a redrawn variant drifts silently
+    and the app ends up with two different logos depending on the theme."""
+    light = open(os.path.join(ROOT, "img", "app.svg"), encoding="utf-8").read()
+    dark = open(os.path.join(ROOT, "img", "app-dark.svg"), encoding="utf-8").read()
+    shapes = re.compile(r'\s(?:d|x|y|width|height|rx)="[^"]*"')
+    assert shapes.findall(light) == shapes.findall(dark), \
+        "the light and dark icons are no longer the same drawing"
