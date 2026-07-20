@@ -24,6 +24,7 @@ from nc_py_api import AsyncNextcloudApp, talk_bot
 from nc_py_api.ex_app import AppAPIAuthMiddleware, LogLvl, atalk_bot_msg, run_app, set_handlers
 
 import archive_api
+import l10n
 import settings
 import talk_bot as bot
 
@@ -44,7 +45,17 @@ APP = FastAPI(lifespan=lifespan)
 APP.include_router(archive_api.ROUTER)
 # Global AppAPI auth. set_handlers() exempts /heartbeat itself; do not add our
 # own auth in front of it.
-APP.add_middleware(AppAPIAuthMiddleware)
+# Static assets are exempt: the browser fetches the bundle and icons as an
+# ordinary page load, without the AppAPI signing headers, so authenticating them
+# means the script tag gets a 401 and the app renders as a blank page — which is
+# exactly how this first failed.
+#
+# The exemption covers assets only. /v1/* stays authenticated: that is where the
+# meetings are.
+APP.add_middleware(
+    AppAPIAuthMiddleware,
+    disable_for=["js/*", "css/*", "img/*", "l10n/*"],
+)
 
 
 async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
@@ -63,7 +74,9 @@ async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
             await nc.ui.resources.set_script(
                 "top_menu", "done_transcription", "js/done_transcription-main")
             await nc.ui.top_menu.register(
-                "done_transcription", "Meetings", "img/app.svg")
+                "done_transcription",
+                l10n.translate("Meetings", await settings.current_language(nc)),
+                "img/app.svg")
             await nc.log(LogLvl.WARNING, "Done Transcription enabled")
         else:
             await nc.ui.top_menu.unregister("done_transcription")

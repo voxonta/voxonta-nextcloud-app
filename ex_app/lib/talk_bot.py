@@ -22,6 +22,7 @@ import logging
 from nc_py_api import AsyncNextcloudApp
 from nc_py_api.talk_bot import AsyncTalkBot, TalkBotMessage
 
+import l10n
 import recording_state
 
 logger = logging.getLogger(__name__)
@@ -40,17 +41,36 @@ BOT = AsyncTalkBot(
     "Transcribes calls and posts the transcript to the conversation",
 )
 
-_STOPPED_REPLY = (
-    "Recording stopped. Nothing said from now on in this call will be "
-    "transcribed. Type /запись to resume."
-)
-_STARTED_REPLY = "Recording resumed for this call."
+# The language to answer in, learned when the app is enabled. Module-level
+# because a chat message arrives without a Nextcloud session to ask, and asking
+# per message would put a settings lookup in front of every reply.
+_language = ""
+
+_STOPPED = ("Recording stopped. Nothing said from now on in this call will be "
+            "transcribed.")
+_STARTED = "Recording resumed for this call."
+
+
+def _reply(recording: bool) -> str:
+    """The confirmation, with the command needed to undo it.
+
+    The commands stay untranslated on purpose — both spellings work in either
+    language, and quoting the one the room is most likely to type is more useful
+    than quoting the one that matches the reply's grammar.
+    """
+    if recording:
+        return l10n.translate(_STARTED, _language)
+    resume = "/запись" if l10n._normalise(_language) == "ru" else "/record"
+    return f"{l10n.translate(_STOPPED, _language)} {resume}"
 
 
 async def register(nc: AsyncNextcloudApp, enabled: bool) -> None:
     """Register (or drop) the bot. Called from /enabled, so it must be fast and
     must not raise on its own — a failure there blocks the whole app."""
+    global _language
     try:
+        import settings
+        _language = await settings.current_language(nc)
         await BOT.enabled_handler(enabled, nc)
     except Exception:
         logger.exception("talk bot registration failed (enabled=%s)", enabled)
@@ -97,8 +117,6 @@ async def _set_recording(message: TalkBotMessage, *, recording: bool) -> None:
         recording_state.set_recording(
             token, recording, actor=message.actor_display_name or "",
         )
-        await BOT.send_message(
-            _STARTED_REPLY if recording else _STOPPED_REPLY, message,
-        )
+        await BOT.send_message(_reply(recording), message)
     except Exception:
         logger.exception("failed to answer the recording command in %s", token)

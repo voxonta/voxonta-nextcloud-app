@@ -8,25 +8,26 @@
 <template>
 	<div class="archive" :class="{ 'archive--detail-open': selected }">
 		<aside class="archive__list">
-			<h1 class="archive__title">Meetings</h1>
+			<h1 class="archive__title">{{ t('Meetings') }}</h1>
 			<MeetingList :selected-id="selected ? selected.session_id : ''" @select="open" />
 		</aside>
 
 		<main class="archive__detail">
 			<button v-if="selected" class="archive__back" @click="selected = null">
-				← Meetings
+				← {{ t('Meetings') }}
 			</button>
 
 			<MeetingDetail v-if="selected" :meeting="selected" />
 
 			<p v-else class="archive__placeholder">
-				Select a meeting to read its transcript.
+				{{ t('Select a meeting to read its transcript.') }}
 			</p>
 		</main>
 	</div>
 </template>
 
 <script>
+import { translate } from './l10n.js'
 import MeetingDetail from './components/MeetingDetail.vue'
 import MeetingList from './components/MeetingList.vue'
 
@@ -39,6 +40,8 @@ export default {
 	},
 
 	methods: {
+		t: translate,
+
 		open(meeting) {
 			this.selected = meeting
 		},

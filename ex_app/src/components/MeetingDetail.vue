@@ -12,7 +12,7 @@
 <template>
 	<div class="meeting-detail">
 		<header class="meeting-detail__header">
-			<h2>{{ meeting.room_name || 'Untitled call' }}</h2>
+			<h2>{{ meeting.room_name || t('Untitled call') }}</h2>
 			<p class="meeting-detail__meta">
 				{{ formattedDate }} · {{ formattedDuration }} ·
 				{{ (meeting.participants || []).join(', ') }}
@@ -20,7 +20,7 @@
 		</header>
 
 		<section v-if="analysisState === 'ready'" class="meeting-detail__section">
-			<h3>Summary</h3>
+			<h3>{{ t('Summary') }}</h3>
 			<div v-for="artifact in artifacts" :key="artifact.name" class="meeting-detail__artifact">
 				<h4>{{ prettyName(artifact.name) }}</h4>
 				<div class="meeting-detail__markdown" v-text="artifact.content" />
@@ -28,18 +28,18 @@
 		</section>
 
 		<section v-else-if="analysisState === 'running'" class="meeting-detail__section">
-			<h3>Summary</h3>
+			<h3>{{ t('Summary') }}</h3>
 			<p class="meeting-detail__note">
 				<span class="icon-loading-small" />
-				The summary is being prepared. The transcript below is complete.
+				{{ t('The summary is being prepared. The transcript below is complete.') }}
 			</p>
 		</section>
 
 		<section class="meeting-detail__section">
-			<h3>Transcript</h3>
+			<h3>{{ t('Transcript') }}</h3>
 
 			<p v-if="loadingTranscript" class="meeting-detail__note">
-				<span class="icon-loading-small" /> Loading…
+				<span class="icon-loading-small" /> {{ t('Loading…') }}
 			</p>
 
 			<p v-else-if="transcriptError" class="meeting-detail__note meeting-detail__note--error">
@@ -47,7 +47,7 @@
 			</p>
 
 			<p v-else-if="!blocks.length" class="meeting-detail__note">
-				Nobody spoke during this call, or the audio could not be captured.
+				{{ t('Nobody spoke during this call, or the audio could not be captured.') }}
 			</p>
 
 			<div v-else class="meeting-detail__transcript">
@@ -65,6 +65,7 @@
 
 <script>
 import { fetchAnalysis, fetchArtifact, fetchTranscript } from '../api.js'
+import { translate } from '../l10n.js'
 
 export default {
 	name: 'MeetingDetail',
@@ -104,8 +105,11 @@ export default {
 			}
 			const minutes = Math.round((end - start) / 60)
 			return minutes < 60
-				? `${minutes} min`
-				: `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+				? translate('{count} min', { count: minutes })
+				: translate('{hours} h {minutes} min', {
+					hours: Math.floor(minutes / 60),
+					minutes: minutes % 60,
+				})
 		},
 	},
 
@@ -122,6 +126,8 @@ export default {
 	},
 
 	methods: {
+		t: translate,
+
 		async load() {
 			this.loadingTranscript = true
 			this.transcriptError = ''
@@ -137,7 +143,7 @@ export default {
 				this.blocks = this.group(data.segments || [])
 			} catch (e) {
 				if (this.meeting.session_id === sessionId) {
-					this.transcriptError = 'Could not load the transcript.'
+					this.transcriptError = translate('Could not load the transcript.')
 				}
 				console.error('failed to load transcript', e)
 			} finally {
