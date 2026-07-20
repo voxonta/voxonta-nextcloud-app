@@ -59,19 +59,34 @@ class FileArchiveTest extends TestCase {
 			}
 		}
 
+		// The archive folder holds the files, unless the test routes them
+		// through shares (the participant case) — then the folder is absent and
+		// the search fallback runs instead. The folder is read from the index by
+		// its parent id, so the database is what returns the rows.
+		$byId = [];
+		foreach ($nodes as $node) {
+			$byId[$node->getId()] = $node;
+		}
+
+		$folder = $this->createMock(Folder::class);
+		$folder->method('getId')->willReturn(1);
+
 		$userFolder = $this->createMock(Folder::class);
-		// Stand in for the indexed search: apply the same name filter the
-		// database would, so the tests exercise the query actually built —
-		// starts with a date, is not the minutes.
+		$userFolder->method('get')->willReturnCallback(
+			function (string $path) use ($folder, $viaShare) {
+				if (!$viaShare && $path === 'Talk/Транскрипции') {
+					return $folder;
+				}
+				throw new \OCP\Files\NotFoundException();
+			});
+		$userFolder->method('getById')->willReturnCallback(
+			static fn (int $id) => isset($byId[$id]) ? [$byId[$id]] : []);
 		$userFolder->method('search')->willReturnCallback(
-			function () use ($nodes, $lookupThrows) {
+			function () use ($lookupThrows) {
 				if ($lookupThrows) {
 					throw new \RuntimeException('storage down');
 				}
-				// The database filters to dated markdown — transcripts and
-				// their minutes both; the listing and summary sort them out.
-				return array_values(array_filter($nodes, static fn (File $f) =>
-					preg_match('/^20\d\d-\d\d-\d\d /u', $f->getName()) === 1));
+				return [];
 			});
 		$root = $this->createMock(IRootFolder::class);
 		$root->method('getUserFolder')->willReturnCallback(
@@ -79,6 +94,12 @@ class FileArchiveTest extends TestCase {
 				$askedFor = $user;
 				return $userFolder;
 			});
+
+		// The index read: a query builder that ignores its clauses and returns
+		// the fixtures as rows, unless the lookup is set to fail.
+		$db = $this->createMock(\OCP\IDBConnection::class);
+		$db->method('getQueryBuilder')->willReturnCallback(
+			fn () => $this->queryBuilder($nodes, $lookupThrows));
 
 		$shareManager = $this->createMock(IManager::class);
 		$shareManager->method('getSharedWith')->willReturnCallback(
@@ -93,8 +114,35 @@ class FileArchiveTest extends TestCase {
 		$users = $this->createMock(IUserManager::class);
 		$users->method('get')->willReturn($this->createMock(IUser::class));
 
-		return new FileArchive($root, $shareManager, $users,
+		return new FileArchive($root, $shareManager, $users, $db,
 			$this->createMock(LoggerInterface::class));
+	}
+
+	/**
+	 * @param File[] $nodes
+	 */
+	private function queryBuilder(array $nodes, bool $throws): \OCP\DB\QueryBuilder\IQueryBuilder {
+		$qb = $this->createMock(\OCP\DB\QueryBuilder\IQueryBuilder::class);
+		$expr = $this->createMock(\OCP\DB\QueryBuilder\IExpressionBuilder::class);
+		$qb->method('expr')->willReturn($expr);
+		foreach (['select', 'from', 'where', 'andWhere'] as $m) {
+			$qb->method($m)->willReturn($qb);
+		}
+		$qb->method('createNamedParameter')->willReturn('?');
+
+		$result = $this->createMock(\OCP\DB\IResult::class);
+		$result->method('fetchAll')->willReturnCallback(
+			function () use ($nodes, $throws) {
+				if ($throws) {
+					throw new \RuntimeException('storage down');
+				}
+				return array_map(static fn (File $f) => [
+					'fileid' => $f->getId(),
+					'name' => $f->getName(),
+				], $nodes);
+			});
+		$qb->method('executeQuery')->willReturn($result);
+		return $qb;
 	}
 
 	private function file(string $name, string $content): File {
@@ -115,6 +163,7 @@ class FileArchiveTest extends TestCase {
 	private function shareOf(File $file): IShare {
 		$share = $this->createMock(IShare::class);
 		$share->method('getNodeId')->willReturn($file->getId());
+		$share->method('getNodeType')->willReturn('file');
 		$share->method('getTarget')->willReturn('/' . $file->getName());
 		$share->method('getNode')->willReturn($file);
 		return $share;

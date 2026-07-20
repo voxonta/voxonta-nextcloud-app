@@ -10,11 +10,13 @@ use OCA\DoneTranscription\Service\Search\Order;
 use OCA\DoneTranscription\Service\Search\Query;
 use OCP\AppFramework\Http;
 use OCP\Files\File;
+use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use OCP\Files\Search\ISearchBinaryOperator;
 use OCP\Files\Search\ISearchComparison;
 use OCP\Files\Search\ISearchOrder;
+use OCP\IDBConnection;
 use OCP\IUserManager;
 use OCP\Share\IManager;
 use OCP\Share\IShare;
@@ -51,6 +53,17 @@ class FileArchive {
 	private const NAME_PATTERN = '20__-__-__ %';
 
 	/**
+	 * Where the service keeps the files, for the account it writes as and for
+	 * anyone the whole archive is shared to. Listing these directly is the fast
+	 * path; a search across every mount is the slow fallback for participants
+	 * who only have scattered shares.
+	 */
+	private const OWN_FOLDERS = ['Talk/Транскрипции', 'Talk/Протоколы'];
+
+	/** The folder names, for finding a shared-in copy wherever it was mounted. */
+	private const OWN_FOLDER_NAMES = ['Транскрипции', 'Протоколы'];
+
+	/**
 	 * Upper bound on transcripts a search returns. Passing 0 for "no limit"
 	 * makes Nextcloud drop the name filter and return every markdown file, so a
 	 * large finite number is used instead — well past any real archive.
@@ -77,13 +90,14 @@ class FileArchive {
 	 */
 	private const PAGE_GUARD = 1000;
 
-	/** @var array<string, array<int, array{name: string, node: ?File, share: ?IShare}>> */
+	/** @var array<string, array<int, array{id: int, name: string, node: ?File, share: ?IShare}>> */
 	private array $cache = [];
 
 	public function __construct(
 		private IRootFolder $rootFolder,
 		private IManager $shareManager,
 		private IUserManager $userManager,
+		private IDBConnection $db,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -101,12 +115,13 @@ class FileArchive {
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0): array {
 		$candidates = $this->transcriptCandidates($userId);
+		$tHeaders = microtime(true);
 
 		$meetings = [];
 		$scanned = 0;
 		foreach (array_slice($candidates, $offset) as $entry) {
 			$scanned++;
-			$file = $this->resolve($entry);
+			$file = $this->resolve($userId, $entry);
 			$meta = $file === null ? null : $this->transcriptMetadata($file);
 			if ($meta !== null) {
 				$meetings[] = $meta;
@@ -117,12 +132,13 @@ class FileArchive {
 		}
 
 		$this->logger->debug('archive listing for {user}: {total} candidates, '
-			. '{scanned} scanned from {offset}, {kept} shown', [
+			. '{scanned} scanned from {offset}, {kept} shown, headers {ms}ms', [
 				'user' => $userId,
 				'total' => count($candidates),
 				'scanned' => $scanned,
 				'offset' => $offset,
 				'kept' => count($meetings),
+				'ms' => round((microtime(true) - $tHeaders) * 1000),
 			]);
 
 		return [
@@ -150,7 +166,7 @@ class FileArchive {
 				|| $this->timestampPrefix($entry['name']) !== $prefix) {
 				continue;
 			}
-			$file = $this->resolve($entry);
+			$file = $this->resolve($userId, $entry);
 			if ($file !== null) {
 				return $this->contents($file);
 			}
@@ -177,7 +193,7 @@ class FileArchive {
 	 */
 	private function fileFor(string $userId, string $sessionId): File {
 		$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
-		$file = $entry === null ? null : $this->resolve($entry);
+		$file = $entry === null ? null : $this->resolve($userId, $entry);
 		if ($file !== null) {
 			return $file;
 		}
@@ -199,69 +215,133 @@ class FileArchive {
 		}
 
 		$entries = [];
+		$t0 = microtime(true);
 
-		// Two sources, because neither is complete on its own. A file search
-		// sees everything mounted into the user's tree — their own files and
-		// the shares that mounted, which is most of the archive but not the
-		// Talk-conversation shares that never mount. The share manager sees the
-		// shares directly, including personal ones a search can miss. Together
-		// they cover more than either; the file id dedupes the overlap.
-		//
-		// The search filters on the name in the database — "starts with a date,
-		// is not the minutes" — rather than pulling every markdown file the user
-		// can see and sifting it in PHP. For an account with the whole archive
-		// mounted that is the difference between a few hundred rows and thirteen
-		// thousand.
 		try {
 			$userFolder = $this->rootFolder->getUserFolder($userId);
-			$found = $userFolder->search(new Query(
-				// Dated markdown, which is both transcripts and their minutes —
-				// the minutes are kept so summary() can pair them; the listing
-				// filters them out by name. Not filtered here because the same
-				// candidate set answers both.
-				new BinaryOperator(
-					ISearchBinaryOperator::OPERATOR_AND,
-					new Comparison(ISearchComparison::COMPARE_EQUAL,
-						'mimetype', 'text/markdown'),
-					new Comparison(ISearchComparison::COMPARE_LIKE,
-						'name', self::NAME_PATTERN),
-				),
-				// A large finite limit, not 0: passing 0 makes Nextcloud's search
-				// return every markdown file with the name filter dropped, which
-				// is exactly the load this method exists to avoid. The cap is far
-				// past any real archive.
-				self::MAX_RESULTS,
-				0,
-				[new Order(ISearchOrder::DIRECTION_DESCENDING, 'name')],
-				$this->userManager->get($userId),
-			));
-			foreach ($found as $node) {
-				if ($node instanceof File) {
-					$entries[$node->getId()] ??= [
-						'name' => $node->getName(),
-						'node' => $node,
-						'share' => null,
-					];
-				}
-			}
 		} catch (\Throwable $e) {
-			$this->logger->warning('could not search files for {user}', [
+			$this->logger->error('could not open the files of {user}', [
 				'user' => $userId, 'exception' => $e,
 			]);
+			return $this->cache[$userId] = [];
 		}
 
-		$fromSearch = count($entries);
+		// The archive folders, read from the file index by their parent id. Only
+		// names and ids come back — no File objects — because building a File
+		// for each of a few thousand entries is what made this slow, whether
+		// through a search or a directory listing (five seconds for an admin).
+		// The heavy objects are built later, for the fifty rows actually shown.
+		//
+		// The folders are found by name among the user's shares, not by a fixed
+		// path, because a recipient mounts a shared folder wherever they like —
+		// on this instance the archive lands under /Shares, not Talk/. The
+		// service account owns them outright, so its own paths are tried too.
+		$folderIds = $this->archiveFolderIds($userId, $userFolder);
+		foreach ($folderIds as $folderId) {
+			try {
+				$rows = $this->indexRows($folderId);
+			} catch (\Throwable $e) {
+				$this->logger->warning('could not read the index for folder {id}', [
+					'id' => $folderId, 'exception' => $e,
+				]);
+				continue;
+			}
+			foreach ($rows as $row) {
+				$id = (int)$row['fileid'];
+				$entries[$id] ??= [
+					'id' => $id,
+					'name' => (string)$row['name'],
+					'node' => null,
+					'share' => null,
+				];
+			}
+		}
 
-		// Shares of every type — this is where the Talk-conversation files are,
-		// the ones a file search cannot see.
+		// The fallback: an ordinary participant has no such folder, only shares
+		// scattered across conversations. A name-filtered search finds those,
+		// and their account has few mounts to span, so it stays quick. Skipped
+		// entirely when the folders already answered.
+		if ($entries === []) {
+			$entries = $this->searchByName($userId, $userFolder);
+		}
+
+		$fromFolders = count($entries);
+
+		// File shares — the calls shared to a participant individually or into a
+		// conversation, which an archive folder does not cover.
+		$this->addFileShares($userId, $entries);
+
+		$this->logger->debug('candidate files for {user}: {folders} from '
+			. '{n} folders, {total} total after shares ({ms}ms)', [
+				'user' => $userId,
+				'folders' => $fromFolders,
+				'n' => count($folderIds),
+				'total' => count($entries),
+				'ms' => round((microtime(true) - $t0) * 1000),
+			]);
+
+		return $this->cache[$userId] = $entries;
+	}
+
+	/**
+	 * File ids of the archive folders the user can reach.
+	 *
+	 * By name, not by path: the service account holds "Talk/Транскрипции" as its
+	 * own, while a recipient mounts the same shared folder wherever they moved
+	 * it. getNodeType tells a folder share from a file share without loading the
+	 * node, so this stays cheap even for an account with many shares.
+	 *
+	 * @return int[]
+	 */
+	private function archiveFolderIds(string $userId, Folder $userFolder): array {
+		$ids = [];
+
+		// The owner's own copies (the service account), by their known path.
+		foreach (self::OWN_FOLDERS as $path) {
+			try {
+				$folder = $userFolder->get($path);
+				if ($folder instanceof Folder) {
+					$ids[$folder->getId()] = true;
+				}
+			} catch (\Throwable) {
+				// Absent for a recipient — found through their shares below.
+			}
+		}
+
+		// Shared-in copies, found by folder name among the shares.
+		foreach (self::SHARE_TYPES as $type) {
+			try {
+				foreach ($this->shareManager->getSharedWith(
+					$userId, $type, null, self::SHARE_PAGE) as $share) {
+					if ($share->getNodeType() === 'folder'
+						&& in_array(basename($share->getTarget()),
+							self::OWN_FOLDER_NAMES, true)) {
+						$ids[$share->getNodeId()] = true;
+					}
+				}
+			} catch (\Throwable $e) {
+				$this->logger->warning('could not read {type} shares for {user}', [
+					'type' => $type, 'user' => $userId, 'exception' => $e,
+				]);
+			}
+		}
+
+		return array_keys($ids);
+	}
+
+	/**
+	 * Add the individual and conversation file shares to the candidate set.
+	 *
+	 * @param array<int, array{id: int, name: string, node: ?File, share: ?IShare}> $entries
+	 */
+	private function addFileShares(string $userId, array &$entries): void {
 		foreach (self::SHARE_TYPES as $type) {
 			$offset = 0;
 			// Advance by however many actually came back, and stop only when a
 			// page is empty. The count cannot be compared to the requested
-			// limit: Talk's share provider returns fewer than asked without
-			// that meaning the end, and treating a short page as the end lost
-			// most of the archive. GUARD caps the loop if a provider ignored
-			// the offset and kept returning the same page.
+			// limit: Talk's share provider returns fewer than asked without that
+			// meaning the end. GUARD caps the loop if a provider ignored the
+			// offset and kept returning the same page.
 			for ($guard = 0; $guard < self::PAGE_GUARD; $guard++) {
 				try {
 					$shares = $this->shareManager->getSharedWith(
@@ -276,11 +356,13 @@ class FileArchive {
 					break;
 				}
 				foreach ($shares as $share) {
+					if ($share->getNodeType() !== 'file') {
+						continue;
+					}
 					$id = $share->getNodeId();
-					// The owner's own copy, already added, is the better handle:
-					// it opens without resolving a share.
 					if (!isset($entries[$id])) {
 						$entries[$id] = [
+							'id' => $id,
 							'name' => basename($share->getTarget()),
 							'node' => null,
 							'share' => $share,
@@ -290,15 +372,72 @@ class FileArchive {
 				$offset += count($shares);
 			}
 		}
+	}
 
-		$this->logger->debug('candidate files for {user}: {search} from search, '
-			. '{total} total after shares', [
-				'user' => $userId,
-				'search' => $fromSearch,
-				'total' => count($entries),
+	/**
+	 * The dated markdown directly under a folder, from the file index.
+	 *
+	 * Read from oc_filecache by parent id: an indexed lookup that returns names
+	 * and ids without instantiating a File per row. The name filter is the SQL
+	 * shape of a date — `20__-__-__ %`, where `_` is any one character — so it
+	 * runs in the database, not in PHP.
+	 *
+	 * @return array<int, array{fileid: int, name: string}>
+	 */
+	private function indexRows(int $parentId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('fileid', 'name')
+			->from('filecache')
+			->where($qb->expr()->eq('parent',
+				$qb->createNamedParameter($parentId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->like('name',
+				$qb->createNamedParameter(self::NAME_PATTERN)));
+		$result = $qb->executeQuery();
+		$rows = $result->fetchAll();
+		$result->closeCursor();
+		return $rows;
+	}
+
+	/**
+	 * The name-filtered index search, used only when the archive folders are
+	 * not mounted for this user.
+	 *
+	 * @return array<int, array{name: string, node: ?File, share: ?IShare}>
+	 */
+	private function searchByName(string $userId, Folder $userFolder): array {
+		$entries = [];
+		try {
+			$found = $userFolder->search(new Query(
+				new BinaryOperator(
+					ISearchBinaryOperator::OPERATOR_AND,
+					new Comparison(ISearchComparison::COMPARE_EQUAL,
+						'mimetype', 'text/markdown'),
+					new Comparison(ISearchComparison::COMPARE_LIKE,
+						'name', self::NAME_PATTERN),
+				),
+				// A large finite limit, not 0: passing 0 makes Nextcloud's search
+				// drop the name filter and return every markdown file.
+				self::MAX_RESULTS,
+				0,
+				[new Order(ISearchOrder::DIRECTION_DESCENDING, 'name')],
+				$this->userManager->get($userId),
+			));
+			foreach ($found as $node) {
+				if ($node instanceof File) {
+					$entries[$node->getId()] ??= [
+						'id' => $node->getId(),
+						'name' => $node->getName(),
+						'node' => $node,
+						'share' => null,
+					];
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->logger->warning('could not search files for {user}', [
+				'user' => $userId, 'exception' => $e,
 			]);
-
-		return $this->cache[$userId] = $entries;
+		}
+		return $entries;
 	}
 
 	/**
@@ -329,20 +468,35 @@ class FileArchive {
 	}
 
 	/**
-	 * @param array{name: string, node: ?File, share: ?IShare} $entry
+	 * Turn a candidate into a File, building the heavy object only now — for the
+	 * page being shown, not for every candidate.
+	 *
+	 * @param array{id: int, name: string, node: ?File, share: ?IShare} $entry
 	 */
-	private function resolve(array $entry): ?File {
+	private function resolve(string $userId, array $entry): ?File {
 		if ($entry['node'] instanceof File) {
 			return $entry['node'];
 		}
 		try {
-			$node = $entry['share']?->getNode();
-			return $node instanceof File ? $node : null;
+			if ($entry['share'] !== null) {
+				$node = $entry['share']->getNode();
+				return $node instanceof File ? $node : null;
+			}
+			// From the index: only the id is known, so ask the user's tree for
+			// it. Resolved against their own mounts, so it doubles as the access
+			// check — a file they cannot reach comes back as nothing.
+			$userFolder = $this->rootFolder->getUserFolder($userId);
+			foreach ($userFolder->getById($entry['id']) as $node) {
+				if ($node instanceof File) {
+					return $node;
+				}
+			}
+			return null;
 		} catch (\Throwable $e) {
-			// A share whose file was deleted since — skip it rather than fail
-			// the whole listing.
-			$this->logger->warning('could not resolve a shared file', [
-				'exception' => $e,
+			// A file deleted since it was indexed — skip it rather than fail the
+			// whole listing.
+			$this->logger->warning('could not resolve file {id}', [
+				'id' => $entry['id'], 'exception' => $e,
 			]);
 			return null;
 		}
