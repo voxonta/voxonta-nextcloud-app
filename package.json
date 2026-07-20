@@ -1,5 +1,5 @@
 {
-  "name": "done-transcription",
+  "name": "done_transcription",
   "description": "Transcription archive UI for Nextcloud Talk",
   "version": "0.1.0",
   "license": "AGPL-3.0-or-later",
@@ -14,6 +14,18 @@
     "vue": "^2.7.16"
   },
   "devDependencies": {
-    "@nextcloud/webpack-vue-config": "^6.0.1"
+    "@nextcloud/webpack-vue-config": "^6.0.1",
+    "@babel/core": "^7.22.9",
+    "babel-loader": "^10.0.0",
+    "css-loader": "^7.1.1",
+    "node-polyfill-webpack-plugin": "4.0.0",
+    "sass": "^1.64.2",
+    "sass-loader": "^16.0.2",
+    "style-loader": "^4.0.0",
+    "terser-webpack-plugin": "^5.3.10",
+    "ts-loader": "^9.4.4",
+    "vue-loader": "^15.11.1",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^6.0.1"
   }
 }

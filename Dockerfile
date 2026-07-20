@@ -1,6 +1,19 @@
 # Two-stage build, modelled on nextcloud/app-skeleton-python.
 # Build for the target host arch with: docker buildx build --platform linux/amd64
 
+# The frontend is built here rather than committed: a bundle in git goes stale
+# the moment someone edits a .vue file and forgets to rebuild. Building it in the
+# image also means a fresh clone produces a working app — otherwise the image
+# comes out without a UI and nobody notices until the menu entry opens blank.
+FROM node:22-slim AS frontend
+
+WORKDIR /build
+COPY package.json package-lock.json* webpack.js ./
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+COPY ex_app/src/ ./ex_app/src/
+RUN npm run build
+
+
 FROM python:3.12-slim-bookworm AS builder
 
 ARG TARGETARCH
@@ -52,9 +65,8 @@ COPY --from=builder /usr/local/bin/frpc /usr/local/bin/frpc
 RUN apt-get update && apt-get install -y --no-install-recommends curl procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Built frontend included: the image must be self-contained, so the bundle is
-# built before packaging rather than at container start.
 ADD ex_app/ /ex_app/
+COPY --from=frontend /build/ex_app/js/ /ex_app/js/
 COPY start.sh healthcheck.sh /
 RUN chmod +x /start.sh /healthcheck.sh
 
