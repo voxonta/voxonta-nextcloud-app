@@ -1,0 +1,30 @@
+{
+    "name": "devsoftmus/done-transcription-app",
+    "description": "Transcription and post-call analysis for Nextcloud Talk",
+    "license": "AGPL-3.0-or-later",
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.1"
+        }
+    },
+    "autoload": {
+        "psr-4": {
+            "OCA\\DoneTranscription\\": "lib/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "OCA\\DoneTranscription\\Tests\\": "tests/php/",
+            "OCP\\": "vendor/nextcloud/ocp/OCP/"
+        }
+    },
+    "require-dev": {
+        "nextcloud/ocp": "^30.0",
+        "phpunit/phpunit": "^10.5"
+    },
+    "scripts": {
+        "test": "phpunit --configuration tests/php/phpunit.xml"
+    }
+}

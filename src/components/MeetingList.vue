@@ -11,18 +11,18 @@
 <template>
 	<div class="meeting-list">
 		<div v-if="loading" class="meeting-list__state">
-			<span class="icon-loading-small" /> {{ t('Loading meetings…') }}
+			<span class="icon-loading-small" /> {{ t('done_transcription', 'Loading meetings…') }}
 		</div>
 
 		<div v-else-if="error" class="meeting-list__state meeting-list__state--error">
 			<p>{{ error }}</p>
-			<button @click="load">{{ t('Try again') }}</button>
+			<button @click="load">{{ t('done_transcription', 'Try again') }}</button>
 		</div>
 
 		<div v-else-if="!meetings.length" class="meeting-list__state">
-			<p>{{ t('No transcribed meetings yet.') }}</p>
+			<p>{{ t('done_transcription', 'No transcribed meetings yet.') }}</p>
 			<p class="meeting-list__hint">
-				{{ t('Calls you take part in appear here once they end and the transcript is ready.') }}
+				{{ t('done_transcription', 'Calls you take part in appear here once they end and the transcript is ready.') }}
 			</p>
 		</div>
 
@@ -36,7 +36,7 @@
 				@click="$emit('select', meeting)"
 				@keyup.enter="$emit('select', meeting)">
 				<div class="meeting-list__row">
-					<span class="meeting-list__name">{{ meeting.room_name || t('Untitled call') }}</span>
+					<span class="meeting-list__name">{{ meeting.room_name || t('done_transcription', 'Untitled call') }}</span>
 					<span class="meeting-list__duration">{{ duration(meeting) }}</span>
 				</div>
 				<div class="meeting-list__row meeting-list__row--secondary">
@@ -45,10 +45,10 @@
 				</div>
 				<span
 					v-if="meeting.analysis_status === 'ready'"
-					class="meeting-list__badge">{{ t('Summary') }}</span>
+					class="meeting-list__badge">{{ t('done_transcription', 'Summary') }}</span>
 				<span
 					v-else-if="meeting.analysis_status === 'running'"
-					class="meeting-list__badge meeting-list__badge--muted">{{ t('Analysing') }}…</span>
+					class="meeting-list__badge meeting-list__badge--muted">{{ t('done_transcription', 'Analysing') }}…</span>
 			</li>
 		</ul>
 
@@ -56,14 +56,14 @@
 			v-if="hasMore && !loading"
 			class="meeting-list__more"
 			@click="loadMore">
-			{{ t('Show older meetings') }}
+			{{ t('done_transcription', 'Show older meetings') }}
 		</button>
 	</div>
 </template>
 
 <script>
+import { translate as t } from '@nextcloud/l10n'
 import { fetchMeetings } from '../api.js'
-import { translate } from '../l10n.js'
 
 const PAGE = 50
 
@@ -91,8 +91,6 @@ export default {
 	},
 
 	methods: {
-		t: translate,
-
 		async load() {
 			this.loading = true
 			this.error = ''
@@ -104,7 +102,7 @@ export default {
 				// Say what happened rather than showing an empty list — an
 				// empty list reads as "you have no meetings", which is a
 				// different and misleading statement.
-				this.error = translate('Could not load your meetings. The transcription service may be unavailable.')
+				this.error = t('done_transcription', 'Could not load your meetings. The transcription service may be unavailable.')
 				console.error('failed to load meetings', e)
 			} finally {
 				this.loading = false
@@ -138,7 +136,7 @@ export default {
 			// "Today, 14:05" is easier to place than a full date for the calls
 			// people look for most often — the recent ones.
 			return sameDay
-				? `${translate('Today')}, ${time}`
+				? `${t('done_transcription', 'Today')}, ${time}`
 				: `${started.toLocaleDateString()}, ${time}`
 		},
 
@@ -149,8 +147,8 @@ export default {
 			}
 			const minutes = Math.round((end - start) / 60)
 			return minutes < 60
-				? translate('{count} min', { count: minutes })
-				: translate('{hours} h {minutes} min', {
+				? t('done_transcription', '{count} min', { count: minutes })
+				: t('done_transcription', '{hours} h {minutes} min', {
 					hours: Math.floor(minutes / 60),
 					minutes: minutes % 60,
 				})
@@ -165,7 +163,7 @@ export default {
 			// only fall back to a count when the list is long.
 			return names.length <= 3
 				? names.join(', ')
-				: translate('{names} and {count} others', {
+				: t('done_transcription', '{names} and {count} others', {
 					names: names.slice(0, 2).join(', '),
 					count: names.length - 2,
 				})

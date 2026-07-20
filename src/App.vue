@@ -8,26 +8,26 @@
 <template>
 	<div class="archive" :class="{ 'archive--detail-open': selected }">
 		<aside class="archive__list">
-			<h1 class="archive__title">{{ t('Meetings') }}</h1>
+			<h1 class="archive__title">{{ t('done_transcription', 'Meetings') }}</h1>
 			<MeetingList :selected-id="selected ? selected.session_id : ''" @select="open" />
 		</aside>
 
 		<main class="archive__detail">
 			<button v-if="selected" class="archive__back" @click="selected = null">
-				← {{ t('Meetings') }}
+				← {{ t('done_transcription', 'Meetings') }}
 			</button>
 
 			<MeetingDetail v-if="selected" :meeting="selected" />
 
 			<p v-else class="archive__placeholder">
-				{{ t('Select a meeting to read its transcript.') }}
+				{{ t('done_transcription', 'Select a meeting to read its transcript.') }}
 			</p>
 		</main>
 	</div>
 </template>
 
 <script>
-import { translate } from './l10n.js'
+import { translate as t } from '@nextcloud/l10n'
 import MeetingDetail from './components/MeetingDetail.vue'
 import MeetingList from './components/MeetingList.vue'
 
@@ -40,8 +40,6 @@ export default {
 	},
 
 	methods: {
-		t: translate,
-
 		open(meeting) {
 			this.selected = meeting
 		},

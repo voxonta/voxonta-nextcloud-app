@@ -1,10 +1,5 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
 node_modules/
-.env
-*.log
-
-# Built frontend bundle — produced by `npm run build`, not committed.
-ex_app/js/
+vendor/
+js/
+tests/php/.phpunit.cache/
+__pycache__/
