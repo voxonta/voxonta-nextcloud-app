@@ -5,55 +5,62 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Service;
 
 use OCP\AppFramework\Http;
-use OCA\DoneTranscription\Service\Search\BinaryOperator;
-use OCA\DoneTranscription\Service\Search\Comparison;
-use OCA\DoneTranscription\Service\Search\Order;
-use OCA\DoneTranscription\Service\Search\Query;
 use OCP\Files\File;
+use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
-use OCP\Files\Search\ISearchBinaryOperator;
-use OCP\Files\Search\ISearchComparison;
-use OCP\Files\Search\ISearchOperator;
-use OCP\Files\Search\ISearchOrder;
-use OCP\IUserManager;
+use OCP\Share\IManager;
+use OCP\Share\IShare;
 use Psr\Log\LoggerInterface;
 
 /**
- * The archive, read from the files that already exist.
+ * The archive, read from the files the transcription service already writes.
  *
- * The transcription service writes two markdown files per call — the
- * transcript, and the minutes produced by the analyser — and shares them with
- * the people who were on the call. This class reads exactly that, in exactly
- * that format. Nothing here asks the service to change, and nothing requires a
- * migration: the archive on screen is the archive on disk today.
+ * Access control is Nextcloud's, and this is the whole design: a call reaches a
+ * person only if it was shared with them, and the shares are what this class
+ * reads. There is no permission rule here to enforce or to forget — a call that
+ * was never shared is simply not in what comes back.
  *
- * Access control is therefore Nextcloud's. The search runs against the
- * *caller's* own files, so a call that was never shared with them cannot be
- * found here — there is no rule to enforce and none to forget.
+ * Files come from two sources at once. A file search sees everything mounted
+ * into the user's tree; the share manager sees shares directly. Neither is
+ * complete alone — the search misses Talk-conversation shares that never mount,
+ * the share manager's getSharedWith does not return Talk's per-user room shares
+ * — so both are read and merged by file id.
  *
- * Files are recognised by their header rather than by their location, because
- * a share lands wherever the recipient moved it. The pairing between a
- * transcript and its minutes is the timestamp both filenames start with, which
- * is what the service already puts there.
+ * Two markdown formats live in the archive and both are read: current files
+ * open with a YAML block, spring ones with a "# Транскрипция:" header.
+ * Converting the old ones would rewrite documents people already hold.
  */
 class FileArchive {
 	private const HEADER_LEGACY = '# Транскрипция:';
 	private const MINUTES_MARKER = 'Протокол';
 
 	/**
-	 * The date a transcript's filename starts with: "2026-03-24 …".
-	 *
-	 * `_` matches exactly one character, so this is the shape of a date and not
-	 * merely "starts with 20". The looser version also matched prompt files
-	 * named 20_extract_knowledge.md — and since `_` sorts above digits, those
-	 * filled the whole first page and pushed every real transcript out of it.
+	 * Share types a recipient can hold. Numeric rather than the IShare::TYPE_*
+	 * constants because the newer ones (USERROOM, DECK_USER) are absent from
+	 * some versions of the published stubs, while the values are stable and the
+	 * core takes an int. Legend: 0 user, 1 group, 2 usergroup, 10 Talk room,
+	 * 11 Talk user-in-room, 13 Deck. The two Talk types are exactly what a file
+	 * search cannot see.
 	 */
-	private const NAME_PATTERN = '20__-__-__ %';
+	private const SHARE_TYPES = [0, 1, 2, 10, 11, 13];
+
+	/** Shares fetched per page, per type. */
+	private const SHARE_PAGE = 200;
+
+	/**
+	 * Most pages any one share type may take before we stop. At SHARE_PAGE=200
+	 * this is 200 000 shares — far past any real archive, and only a backstop
+	 * against a provider that ignores the offset and never advances.
+	 */
+	private const PAGE_GUARD = 1000;
+
+	/** @var array<string, array<int, array{name: string, node: ?File, share: ?IShare}>> */
+	private array $cache = [];
 
 	public function __construct(
 		private IRootFolder $rootFolder,
-		private IUserManager $userManager,
+		private IManager $shareManager,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -61,48 +68,35 @@ class FileArchive {
 	/**
 	 * Calls this person can see, newest first.
 	 *
-	 * Paging is over transcripts, but the index pages over *files*, and the two
-	 * differ: some files that match the name pattern turn out on reading not to
-	 * be transcripts. So the offset the caller passes is a file offset, and the
-	 * answer carries the offset to resume from — otherwise a page a few
-	 * non-transcripts short would look like the end of the archive, and the
-	 * older calls behind it would never load.
+	 * Candidate names are cheap — a share carries its target path without the
+	 * file being loaded — so the full list is filtered and sorted on names
+	 * alone, and only the page about to be shown has its header read. Paging is
+	 * over transcripts, and the offset the caller gets back is where to resume.
 	 *
 	 * @return array{meetings: array<int, array<string, mixed>>,
 	 *               next_offset: int, has_more: bool}
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0): array {
+		$candidates = $this->transcriptCandidates($userId);
+
 		$meetings = [];
 		$scanned = 0;
-		$exhausted = false;
-
-		// Read files in batches until the page is full or the archive runs out.
-		// Selection, ordering and paging are the index's job — doing them in
-		// PHP would mean fetching every markdown file the user can see, and this
-		// instance has thousands.
-		while (count($meetings) < $limit) {
-			$batch = $this->transcripts($userId, $limit, $offset + $scanned);
-			foreach ($batch as $file) {
-				$scanned++;
-				$meta = $this->transcriptMetadata($file);
-				if ($meta !== null) {
-					$meetings[] = $meta;
-					if (count($meetings) >= $limit) {
-						break;
-					}
+		foreach (array_slice($candidates, $offset) as $entry) {
+			$scanned++;
+			$file = $this->resolve($entry);
+			$meta = $file === null ? null : $this->transcriptMetadata($file);
+			if ($meta !== null) {
+				$meetings[] = $meta;
+				if (count($meetings) >= $limit) {
+					break;
 				}
-			}
-			if (count($batch) < $limit) {
-				$exhausted = true;
-				break;
 			}
 		}
 
-		// Counts only — never names or content: filenames carry meeting titles
-		// and participants.
-		$this->logger->debug('archive listing for {user}: {scanned} files from '
-			. 'offset {offset}, {kept} transcripts', [
+		$this->logger->debug('archive listing for {user}: {total} candidates, '
+			. '{scanned} scanned from {offset}, {kept} shown', [
 				'user' => $userId,
+				'total' => count($candidates),
 				'scanned' => $scanned,
 				'offset' => $offset,
 				'kept' => count($meetings),
@@ -111,29 +105,35 @@ class FileArchive {
 		return [
 			'meetings' => $meetings,
 			'next_offset' => $offset + $scanned,
-			'has_more' => !$exhausted,
+			'has_more' => ($offset + $scanned) < count($candidates),
 		];
 	}
 
 	/**
-	 * The minutes: what people open, when the analyser has produced them.
+	 * The minutes, when the analyser has produced them.
 	 *
 	 * @throws BackendException
 	 */
 	public function summary(string $userId, string $sessionId): string {
 		$transcript = $this->fileFor($userId, $sessionId);
 		$prefix = $this->timestampPrefix($transcript->getName());
+		if ($prefix === '') {
+			return '';
+		}
 
-		// Asked of the index by name, so the answer is the one file rather than
-		// every file with a chance of being it.
-		foreach ($this->minutesMatching($userId, $prefix) as $candidate) {
-			if ($candidate->getId() !== $transcript->getId()) {
-				return $this->contents($candidate);
+		foreach ($this->candidates($userId) as $id => $entry) {
+			if ($id === (int)$sessionId
+				|| !str_contains($entry['name'], self::MINUTES_MARKER)
+				|| $this->timestampPrefix($entry['name']) !== $prefix) {
+				continue;
+			}
+			$file = $this->resolve($entry);
+			if ($file !== null) {
+				return $this->contents($file);
 			}
 		}
 
-		// A call that was transcribed but never analysed is a normal state, not
-		// an error: the analyser runs after the fact and can be turned off.
+		// A call transcribed but not analysed is a normal state, not an error.
 		return '';
 	}
 
@@ -145,128 +145,165 @@ class FileArchive {
 	}
 
 	/**
-	 * The transcript behind a call id, if this person may see it.
+	 * The file behind a call id, if this person may see it.
 	 *
-	 * getById is resolved against the caller's own mounts, so a file they were
-	 * never given comes back as nothing — the permission check is the lookup.
+	 * The id is looked up among the caller's own shares, so a file never shared
+	 * with them is not there — the lookup is the permission check.
 	 *
 	 * @throws BackendException
 	 */
 	private function fileFor(string $userId, string $sessionId): File {
-		try {
-			$userFolder = $this->rootFolder->getUserFolder($userId);
-			$nodes = $userFolder->getById((int)$sessionId);
-		} catch (\Throwable $e) {
-			$this->logger->error('could not resolve call {id} for {user}', [
-				'id' => $sessionId, 'user' => $userId, 'exception' => $e,
-			]);
-			$nodes = [];
+		$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
+		$file = $entry === null ? null : $this->resolve($entry);
+		if ($file !== null) {
+			return $file;
 		}
 
-		foreach ($nodes as $node) {
-			if ($node instanceof File) {
-				return $node;
-			}
-		}
-
-		// Not "no access" — from here the two are indistinguishable, and
-		// distinguishing them would confirm the call exists to someone who
-		// cannot open it.
+		// Not "no access" — from here the two are indistinguishable, and saying
+		// which would confirm the call exists to someone who cannot open it.
 		throw new BackendException('not found', Http::STATUS_NOT_FOUND);
 	}
 
 	/**
-	 * A stable handle for a call.
+	 * Every markdown file the user can reach, by file id, cheaply: names come
+	 * from share targets and directory listings, without loading the files.
 	 *
-	 * The file id is Nextcloud's own and survives renaming and moving, which
-	 * both happen: people tidy their shares.
+	 * @return array<int, array{name: string, node: ?File, share: ?IShare}>
 	 */
+	private function candidates(string $userId): array {
+		if (isset($this->cache[$userId])) {
+			return $this->cache[$userId];
+		}
+
+		$entries = [];
+
+		// Two sources, because neither is complete on its own. A file search
+		// sees everything mounted into the user's tree — their own files and
+		// the shares that mounted, which is most of the archive but not the
+		// Talk-conversation shares that never mount. The share manager sees the
+		// shares directly, including personal ones a search can miss. Together
+		// they cover more than either; the file id dedupes the overlap.
+		try {
+			$userFolder = $this->rootFolder->getUserFolder($userId);
+			foreach ($userFolder->searchByMime('text/markdown') as $node) {
+				if ($node instanceof File) {
+					$entries[$node->getId()] ??= [
+						'name' => $node->getName(),
+						'node' => $node,
+						'share' => null,
+					];
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->logger->warning('could not search files for {user}', [
+				'user' => $userId, 'exception' => $e,
+			]);
+		}
+
+		$fromSearch = count($entries);
+
+		// Shares of every type — this is where the Talk-conversation files are,
+		// the ones a file search cannot see.
+		foreach (self::SHARE_TYPES as $type) {
+			$offset = 0;
+			// Advance by however many actually came back, and stop only when a
+			// page is empty. The count cannot be compared to the requested
+			// limit: Talk's share provider returns fewer than asked without
+			// that meaning the end, and treating a short page as the end lost
+			// most of the archive. GUARD caps the loop if a provider ignored
+			// the offset and kept returning the same page.
+			for ($guard = 0; $guard < self::PAGE_GUARD; $guard++) {
+				try {
+					$shares = $this->shareManager->getSharedWith(
+						$userId, $type, null, self::SHARE_PAGE, $offset);
+				} catch (\Throwable $e) {
+					$this->logger->warning('could not read {type} shares for {user}', [
+						'type' => $type, 'user' => $userId, 'exception' => $e,
+					]);
+					break;
+				}
+				if ($shares === []) {
+					break;
+				}
+				foreach ($shares as $share) {
+					$id = $share->getNodeId();
+					// The owner's own copy, already added, is the better handle:
+					// it opens without resolving a share.
+					if (!isset($entries[$id])) {
+						$entries[$id] = [
+							'name' => basename($share->getTarget()),
+							'node' => null,
+							'share' => $share,
+						];
+					}
+				}
+				$offset += count($shares);
+			}
+		}
+
+		$this->logger->debug('candidate files for {user}: {search} from search, '
+			. '{total} total after shares', [
+				'user' => $userId,
+				'search' => $fromSearch,
+				'total' => count($entries),
+			]);
+
+		return $this->cache[$userId] = $entries;
+	}
+
+	/**
+	 * Candidates that look like a transcript by name — newest first, and no
+	 * files opened yet.
+	 *
+	 * @return array<int, array{name: string, node: ?File, share: ?IShare}>
+	 */
+	private function transcriptCandidates(string $userId): array {
+		$transcripts = array_filter(
+			$this->candidates($userId),
+			fn (array $e) => $this->looksLikeTranscript($e['name']),
+		);
+
+		// Filenames begin with the timestamp, so sorting them reverse is
+		// chronological — newest first, without reading a single file.
+		uasort($transcripts, static fn ($a, $b) => strcmp($b['name'], $a['name']));
+		return array_values($transcripts);
+	}
+
+	/**
+	 * A transcript's filename starts with a date and is not the minutes. Both
+	 * checks are on the name alone; the header confirms it later.
+	 */
+	private function looksLikeTranscript(string $name): bool {
+		return preg_match('/^20\d\d-\d\d-\d\d /u', $name) === 1
+			&& !str_contains($name, self::MINUTES_MARKER);
+	}
+
+	/**
+	 * @param array{name: string, node: ?File, share: ?IShare} $entry
+	 */
+	private function resolve(array $entry): ?File {
+		if ($entry['node'] instanceof File) {
+			return $entry['node'];
+		}
+		try {
+			$node = $entry['share']?->getNode();
+			return $node instanceof File ? $node : null;
+		} catch (\Throwable $e) {
+			// A share whose file was deleted since — skip it rather than fail
+			// the whole listing.
+			$this->logger->warning('could not resolve a shared file', [
+				'exception' => $e,
+			]);
+			return null;
+		}
+	}
+
 	private function sessionId(File $file): string {
 		return (string)$file->getId();
 	}
 
 	/**
-	 * Transcripts, newest first, one page at a time.
-	 *
-	 * @return File[]
-	 */
-	private function transcripts(string $userId, int $limit, int $offset): array {
-		return $this->search($userId, new BinaryOperator(
-			ISearchBinaryOperator::OPERATOR_AND,
-			$this->isMarkdown(),
-			$this->nameLike(self::NAME_PATTERN),
-			// The minutes sit beside the transcript and share its name; a
-			// listing that included them would show every call twice.
-			new BinaryOperator(ISearchBinaryOperator::OPERATOR_NOT,
-				$this->nameLike('%' . self::MINUTES_MARKER . '%')),
-		), $limit, $offset);
-	}
-
-	/**
-	 * The minutes belonging to a given timestamp.
-	 *
-	 * @return File[]
-	 */
-	private function minutesMatching(string $userId, string $prefix): array {
-		if ($prefix === '') {
-			return [];
-		}
-		return $this->search($userId, new BinaryOperator(
-			ISearchBinaryOperator::OPERATOR_AND,
-			$this->isMarkdown(),
-			$this->nameLike($prefix . '%'),
-			$this->nameLike('%' . self::MINUTES_MARKER . '%'),
-		), 5, 0);
-	}
-
-	/**
-	 * @return File[]
-	 */
-	private function search(string $userId, ISearchOperator $operator,
-		int $limit, int $offset): array {
-		try {
-			$userFolder = $this->rootFolder->getUserFolder($userId);
-			$user = $this->userManager->get($userId);
-			$found = $userFolder->search(new Query(
-				$operator,
-				$limit,
-				$offset,
-				// Names begin with the timestamp, so descending by name is
-				// newest first — ordered by the database, not by us.
-				[new Order(ISearchOrder::DIRECTION_DESCENDING, 'name')],
-				$user,
-			));
-		} catch (\Throwable $e) {
-			// Show nothing rather than everything, and say why in the log.
-			$this->logger->error('could not search the archive for {user}', [
-				'user' => $userId, 'exception' => $e,
-			]);
-			return [];
-		}
-
-		return array_values(array_filter(
-			$found,
-			static fn (Node $node) => $node instanceof File,
-		));
-	}
-
-	private function isMarkdown(): ISearchOperator {
-		return new Comparison(ISearchComparison::COMPARE_EQUAL,
-			'mimetype', 'text/markdown');
-	}
-
-	private function nameLike(string $pattern): ISearchOperator {
-		return new Comparison(ISearchComparison::COMPARE_LIKE, 'name', $pattern);
-	}
-
-	/**
-	 * What the transcript itself states about the call.
-	 *
-	 * Two formats are in the archive and both have to work. Current files open
-	 * with a YAML block — started_at, participants, meeting_name. Files from
-	 * the spring open with "# Транскрипция:" and a couple of Russian-labelled
-	 * lines. Reading only the newer one would silently drop several months of
-	 * calls; converting them would rewrite files people already have.
+	 * What the transcript's own header states about the call.
 	 *
 	 * @return array<string, mixed>|null null when this is not a transcript
 	 */
@@ -325,9 +362,8 @@ class FileArchive {
 			}
 		}
 
-		// The minutes carry the same shape of header, so the presence of a
-		// meeting name is not enough to call this a transcript; the marker is
-		// that it describes a call at all.
+		// The minutes carry the same shape of header, so a meeting name is not
+		// enough to call this a transcript; the marker is that it states a time.
 		if (!isset($scalars['started_at']) && !isset($scalars['date'])) {
 			return null;
 		}
@@ -366,8 +402,8 @@ class FileArchive {
 			fclose($handle);
 			return is_string($head) ? $head : null;
 		} catch (\Throwable $e) {
-			$this->logger->warning('could not read the header of {path}', [
-				'path' => $file->getPath(), 'exception' => $e,
+			$this->logger->warning('could not read a transcript header', [
+				'exception' => $e,
 			]);
 			return null;
 		}
@@ -380,9 +416,7 @@ class FileArchive {
 		try {
 			return (string)$file->getContent();
 		} catch (\Throwable $e) {
-			$this->logger->error('could not read {path}', [
-				'path' => $file->getPath(), 'exception' => $e,
-			]);
+			$this->logger->error('could not read a call', ['exception' => $e]);
 			throw new BackendException('could not read the call',
 				Http::STATUS_SERVICE_UNAVAILABLE);
 		}
@@ -403,7 +437,7 @@ class FileArchive {
 		$end = isset($m[3]) ? strtotime($m[1] . ' ' . $m[3]) : false;
 
 		// A call that crosses midnight ends "before" it starts by this reading;
-		// treating that as a negative duration would show nonsense, so drop it.
+		// a negative duration would show nonsense, so drop it.
 		if ($end !== false && $start !== false && $end < $start) {
 			$end = false;
 		}
@@ -421,8 +455,7 @@ class FileArchive {
 	}
 
 	/**
-	 * The part of the filename people recognise, without the timestamp it
-	 * starts with.
+	 * The part of the filename people recognise, without the timestamp.
 	 */
 	private function title(string $name): string {
 		$name = preg_replace('/\.md$/u', '', $name);
@@ -431,8 +464,8 @@ class FileArchive {
 	}
 
 	/**
-	 * The timestamp a filename starts with, which is what pairs a transcript
-	 * with its minutes.
+	 * The timestamp a filename starts with — what pairs a transcript with its
+	 * minutes.
 	 */
 	private function timestampPrefix(string $name): string {
 		return preg_match('/^([\d-]{10}(?:\s[\d-]{8})?)/u', $name, $m) ? $m[1] : '';

@@ -32,14 +32,21 @@ async function request(path, { signal } = {}) {
  *
  * @param {object} options paging
  * @param {number} [options.limit] how many to return
- * @param {number} [options.offset] where to start
+ * @param {number} [options.offset] file offset to resume from
  * @param {AbortSignal} [options.signal] to cancel a superseded request
- * @return {Promise<object[]>}
+ * @return {Promise<{meetings: object[], nextOffset: number, hasMore: boolean}>}
  */
 export async function fetchMeetings({ limit = 50, offset = 0, signal } = {}) {
 	const params = new URLSearchParams({ limit, offset })
 	const data = await request(`/meetings?${params}`, { signal })
-	return data.meetings || []
+	return {
+		meetings: data.meetings || [],
+		// The offset to resume from is the server's to compute: pages are over
+		// files, and some files drop out as non-transcripts, so it is not the
+		// count of meetings shown.
+		nextOffset: data.next_offset || 0,
+		hasMore: !!data.has_more,
+	}
 }
 
 /**

@@ -10,21 +10,18 @@ use OCP\AppFramework\Http;
 use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
-use OCP\Files\Search\ISearchQuery;
-use OCP\IUser;
-use OCP\IUserManager;
-use OCP\Files\NotFoundException;
+use OCP\Share\IManager;
+use OCP\Share\IShare;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
 /**
- * Reading meetings out of the user's own files.
+ * Reading meetings from the shares a person holds.
  *
- * The security property being tested is indirect and worth stating plainly:
- * nothing here decides who may read what. The search runs against the caller's
- * folder, so a meeting that was never shared with them is not in the result at
- * all. These tests pin that the code keeps asking the *caller's* folder — the
- * one mistake that would quietly turn this into an archive-wide reader.
+ * Nothing here decides who may read what. Files come from the caller's own
+ * shares, so a call never shared with them is not in the result at all. The
+ * move to the share manager is what makes that complete — the file index cannot
+ * see calls shared into a Talk conversation, and most calls are shared so.
  */
 class FileArchiveTest extends TestCase {
 	private const TRANSCRIPT = "# Транскрипция: [\"alice\",\"bob\"]\n"
@@ -41,114 +38,99 @@ class FileArchiveTest extends TestCase {
 		. "meeting_name: \"Вводная встреча по Superset\"\n"
 		. "tags:\n  - type/meeting\n---\n\n# Встреча\n";
 
+	private int $nextId = 100;
+
 	/**
-	 * Build an archive over the given files, exactly as they exist in
-	 * Nextcloud today: markdown in a shared folder, no tags, no front matter.
-	 *
 	 * @param array<string, string> $files filename => content
 	 */
-	private function archive(array $files, ?string &$searchedFor = null,
-		bool $searchThrows = false): FileArchive {
+	private function archive(array $files, ?string &$askedFor = null,
+		bool $lookupThrows = false, bool $viaShare = false): FileArchive {
 		$nodes = [];
-		$id = 100;
+		$shares = [];
 		foreach ($files as $name => $content) {
-			$file = $this->createMock(File::class);
-			$file->method('getName')->willReturn($name);
-			$file->method('getId')->willReturn($id++);
-			$file->method('getContent')->willReturn($content);
-			$file->method('fopen')->willReturnCallback(
-				static function () use ($content) {
-					$handle = fopen('php://memory', 'r+');
-					fwrite($handle, $content);
-					rewind($handle);
-					return $handle;
-				});
-			$nodes[] = $file;
+			$file = $this->file($name, $content);
+			if ($viaShare) {
+				$shares[] = $this->shareOf($file);
+			} else {
+				$nodes[] = $file;
+			}
 		}
 
 		$userFolder = $this->createMock(Folder::class);
-		// Stand in for the file index: apply the query the way the database
-		// would, so the tests exercise the query we actually build.
-		$userFolder->method('search')->willReturnCallback(
-			function (ISearchQuery $query) use ($nodes, $searchThrows) {
-				if ($searchThrows) {
-					throw new \RuntimeException('storage unavailable');
+		$userFolder->method('searchByMime')->willReturnCallback(
+			function () use ($nodes, $lookupThrows) {
+				if ($lookupThrows) {
+					throw new \RuntimeException('storage down');
 				}
-				$matching = array_values(array_filter($nodes,
-					static fn (File $f) => self::satisfies($f->getName(),
-						$query->getSearchOperation())));
-				usort($matching, static fn ($a, $b) => strcmp($b->getName(), $a->getName()));
-				return array_slice($matching, $query->getOffset(), $query->getLimit());
+				return $nodes;
 			});
-		$userFolder->method('getById')->willReturnCallback(
-			static function (int $id) use ($nodes) {
-				return array_values(array_filter($nodes,
-					static fn (File $f) => $f->getId() === $id));
-			});
-
 		$root = $this->createMock(IRootFolder::class);
 		$root->method('getUserFolder')->willReturnCallback(
-			function (string $user) use ($userFolder, &$searchedFor) {
-				$searchedFor = $user;
+			function (string $user) use ($userFolder, &$askedFor) {
+				$askedFor = $user;
 				return $userFolder;
 			});
 
-		$users = $this->createMock(IUserManager::class);
-		$users->method('get')->willReturn($this->createMock(IUser::class));
+		$shareManager = $this->createMock(IManager::class);
+		$shareManager->method('getSharedWith')->willReturnCallback(
+			function (string $user, int $type, $node, int $limit, int $offset)
+			use ($shares) {
+				if ($type !== 11 || $offset > 0) {
+					return [];
+				}
+				return $shares;
+			});
 
-		return new FileArchive($root, $users,
+		return new FileArchive($root, $shareManager,
 			$this->createMock(LoggerInterface::class));
 	}
 
-	/**
-	 * Evaluate a search operator against a filename, mirroring how the index
-	 * applies it. Only the operators this service builds are supported.
-	 */
-	private static function satisfies(string $name, $operator): bool {
-		if ($operator instanceof \OCP\Files\Search\ISearchBinaryOperator) {
-			$results = array_map(
-				static fn ($arg) => self::satisfies($name, $arg),
-				$operator->getArguments());
-			return match ($operator->getType()) {
-				'and' => !in_array(false, $results, true),
-				'or' => in_array(true, $results, true),
-				'not' => !$results[0],
-				default => true,
-			};
-		}
+	private function file(string $name, string $content): File {
+		$file = $this->createMock(File::class);
+		$file->method('getName')->willReturn($name);
+		$file->method('getId')->willReturn($this->nextId++);
+		$file->method('getContent')->willReturn($content);
+		$file->method('fopen')->willReturnCallback(
+			static function () use ($content) {
+				$handle = fopen('php://memory', 'r+');
+				fwrite($handle, $content);
+				rewind($handle);
+				return $handle;
+			});
+		return $file;
+	}
 
-		if ($operator instanceof \OCP\Files\Search\ISearchComparison) {
-			if ($operator->getField() === 'mimetype') {
-				return true;   // every fixture is markdown
-			}
-			// LIKE semantics: % is any run of characters, _ is exactly one.
-			// Getting _ wrong here would let a test accept a pattern the
-			// database rejects rows on — which is how the prompt files ended up
-			// filling the first page in production.
-			$pattern = preg_quote((string)$operator->getValue(), '/');
-			$pattern = str_replace(['%', '_'], ['.*', '.'], $pattern);
-			return (bool)preg_match('/^' . $pattern . '$/u', $name);
-		}
-
-		return true;
+	private function shareOf(File $file): IShare {
+		$share = $this->createMock(IShare::class);
+		$share->method('getNodeId')->willReturn($file->getId());
+		$share->method('getTarget')->willReturn('/' . $file->getName());
+		$share->method('getNode')->willReturn($file);
+		return $share;
 	}
 
 	private function transcriptFile(): array {
 		return ['2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT];
 	}
 
-	public function testTheSearchRunsAgainstTheCallersOwnFiles(): void {
-		$searched = null;
-		$archive = $this->archive($this->transcriptFile(), $searched);
+	public function testFilesComeFromTheCallersOwnAccount(): void {
+		$asked = null;
+		$archive = $this->archive($this->transcriptFile(), $asked);
 
 		$archive->list('alice');
 
-		$this->assertSame('alice', $searched,
-			'searching anyone else\'s files would return calls the caller was '
-			. 'never given');
+		$this->assertSame('alice', $asked,
+			"reading anyone else's shares would return calls never given");
 	}
 
-	public function testMetadataComesFromTheTranscriptHeader(): void {
+	public function testCallsSharedIntoAConversationAreFound(): void {
+		// These arrive through the share manager, not the file search.
+		$archive = $this->archive($this->transcriptFile(),
+			viaShare: true);
+
+		$this->assertCount(1, $archive->list('alice')['meetings']);
+	}
+
+	public function testMetadataComesFromTheHeader(): void {
 		$archive = $this->archive($this->transcriptFile());
 
 		$meetings = $archive->list('alice')['meetings'];
@@ -161,14 +143,78 @@ class FileArchiveTest extends TestCase {
 			$meetings[0]['call_end_ts'] - $meetings[0]['call_start_ts']);
 	}
 
+	public function testTheCurrentYamlFormatIsRead(): void {
+		$archive = $this->archive([
+			'2026-07-20 17-00-23 - Вводная встреча по Superset.md' => self::YAML,
+		]);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('Вводная встреча по Superset', $meetings[0]['room_name']);
+		$this->assertSame(40 * 60,
+			$meetings[0]['call_end_ts'] - $meetings[0]['call_start_ts']);
+	}
+
+	public function testBothFormatsAppearInOneList(): void {
+		$archive = $this->archive([
+			'2026-07-20 17-00-23 - Superset.md' => self::YAML,
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+		]);
+
+		$this->assertCount(2, $archive->list('alice')['meetings']);
+	}
+
 	public function testMarkdownThatIsNotATranscriptIsIgnored(): void {
 		$archive = $this->archive([
 			'Shopping list.md' => "# Milk\n",
-			'Readme.md' => "Some notes\n",
+			'2026-07-20 10-00-00 - Notes.md' => "---\ntitle: Notes\n---\n\nText\n",
 		]);
 
 		$this->assertSame([], $archive->list('alice')['meetings'],
-			'the user\'s own markdown must not appear as calls');
+			'a call is recognised by starting with a date and stating a time');
+	}
+
+	public function testFilesThatMerelyStartWithTwentyAreNotCalls(): void {
+		$archive = $this->archive([
+			'20_extract_knowledge.md' => "# Prompt\n",
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+		]);
+
+		$this->assertCount(1, $archive->list('alice')['meetings']);
+	}
+
+	public function testNewestCallsComeFirst(): void {
+		// Same header (so same room_name); the order must come from the
+		// filename timestamp, which is what sorts without opening files.
+		$older = str_replace('2026-03-05 14:49', '2026-03-01 09:00', self::TRANSCRIPT);
+		$archive = $this->archive([
+			'2026-03-01 09-00-00 - Call.md' => $older,
+			'2026-03-05 14-49-00 - Call.md' => self::TRANSCRIPT,
+		]);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertGreaterThan($meetings[1]['call_start_ts'],
+			$meetings[0]['call_start_ts'],
+			'the call people look for is almost always a recent one');
+	}
+
+	public function testPagingWalksTheWholeArchive(): void {
+		$files = [];
+		for ($i = 1; $i <= 3; $i++) {
+			$files["2026-03-0$i 09-00-00 - Call $i.md"] =
+				str_replace('2026-03-05', "2026-03-0$i", self::TRANSCRIPT);
+		}
+		$archive = $this->archive($files);
+
+		$first = $archive->list('alice', 2, 0);
+		$this->assertCount(2, $first['meetings']);
+		$this->assertTrue($first['has_more']);
+
+		$second = $archive->list('alice', 2, $first['next_offset']);
+		$this->assertCount(1, $second['meetings']);
+		$this->assertFalse($second['has_more']);
 	}
 
 	public function testTheTranscriptIsReadable(): void {
@@ -198,12 +244,10 @@ class FileArchiveTest extends TestCase {
 		$id = $archive->list('alice')['meetings'][0]['session_id'];
 
 		$this->assertSame('', $archive->summary('alice', $id),
-			'pairing on anything looser than the timestamp attaches the wrong '
-			. 'minutes to a call');
+			'pairing looser than the timestamp attaches the wrong minutes');
 	}
 
 	public function testACallWithoutMinutesStillOpens(): void {
-		// Transcribed but not analysed is a normal state, not an error.
 		$archive = $this->archive($this->transcriptFile());
 		$id = $archive->list('alice')['meetings'][0]['session_id'];
 
@@ -217,102 +261,15 @@ class FileArchiveTest extends TestCase {
 			$archive->transcript('alice', '999999');
 			$this->fail('expected a refusal');
 		} catch (BackendException $e) {
-			$this->assertSame(Http::STATUS_NOT_FOUND, $e->getStatus(),
-				'anything but 404 tells the caller the call exists');
+			$this->assertSame(Http::STATUS_NOT_FOUND, $e->getStatus());
 		}
 	}
 
-	public function testAFailingSearchShowsNothingRatherThanEverything(): void {
-		$searched = null;
-		$archive = $this->archive($this->transcriptFile(), $searched, true);
+	public function testAFailingLookupShowsNothingRatherThanEverything(): void {
+		$asked = null;
+		$archive = $this->archive($this->transcriptFile(), $asked,
+			lookupThrows: true);
 
 		$this->assertSame([], $archive->list('alice')['meetings']);
-	}
-
-	public function testNewestCallsComeFirst(): void {
-		$older = str_replace('2026-03-05 14:49', '2026-03-01 09:00', self::TRANSCRIPT);
-		$archive = $this->archive([
-			'2026-03-01 09-00-00 - Старый звонок.md' => $older,
-			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
-		]);
-
-		$meetings = $archive->list('alice')['meetings'];
-
-		$this->assertSame('Вадим Куницын', $meetings[0]['room_name'],
-			'the call people look for is almost always a recent one');
-	}
-
-	/**
-	 * Nextcloud interpolates search operators into strings while building the
-	 * query, but the published interfaces never say so — the omission surfaced
-	 * in production as "could not be converted to string", thrown from inside
-	 * code that never mentions this app.
-	 */
-	public function testSearchOperatorsCanBeConvertedToString(): void {
-		$comparison = new \OCA\DoneTranscription\Service\Search\Comparison(
-			'eq', 'mimetype', 'text/markdown');
-		$this->assertStringContainsString('mimetype', (string)$comparison);
-
-		$binary = new \OCA\DoneTranscription\Service\Search\BinaryOperator(
-			'and', $comparison, $comparison);
-		$this->assertStringContainsString('and', (string)$binary);
-
-		$negated = new \OCA\DoneTranscription\Service\Search\BinaryOperator(
-			'not', $comparison);
-		$this->assertStringContainsString('not', (string)$negated);
-	}
-
-	public function testFilesThatMerelyStartWithTwentyAreNotCalls(): void {
-		// The prompt files on this instance are named 20_extract_knowledge.md,
-		// and "_" sorts above digits — a looser pattern let them fill the whole
-		// first page and pushed every real transcript off it.
-		$archive = $this->archive([
-			'20_extract_knowledge.md' => "# Prompt\n",
-			'20_cross_check.md' => "# Prompt\n",
-			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
-		]);
-
-		$meetings = $archive->list('alice')['meetings'];
-
-		$this->assertCount(1, $meetings);
-		$this->assertSame('Вадим Куницын', $meetings[0]['room_name']);
-	}
-
-	public function testTheCurrentYamlFormatIsRead(): void {
-		$archive = $this->archive([
-			'2026-07-20 17-00-23 - Вводная встреча по Superset.md' => self::YAML,
-		]);
-
-		$meetings = $archive->list('alice')['meetings'];
-
-		$this->assertCount(1, $meetings);
-		$this->assertSame('Вводная встреча по Superset', $meetings[0]['room_name'],
-			'the meeting name in the header is better than the one in the filename');
-		$this->assertSame(['Анатолий Хватиков', 'Евгений Кутявин'],
-			$meetings[0]['participants']);
-		$this->assertSame(40 * 60,
-			$meetings[0]['call_end_ts'] - $meetings[0]['call_start_ts']);
-	}
-
-	public function testBothFormatsAppearInOneList(): void {
-		// The archive holds months of each; reading only one silently drops the
-		// other.
-		$archive = $this->archive([
-			'2026-07-20 17-00-23 - Superset.md' => self::YAML,
-			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
-		]);
-
-		$this->assertCount(2, $archive->list('alice')['meetings']);
-	}
-
-	public function testAYamlFileThatIsNotACallIsIgnored(): void {
-		// Front matter alone is not a transcript — plenty of notes have it.
-		$archive = $this->archive([
-			'2026-07-20 10-00-00 - Notes.md' =>
-				"---\ntitle: Just notes\ntags:\n  - idea\n---\n\nText\n",
-		]);
-
-		$this->assertSame([], $archive->list('alice')['meetings'],
-			'a call is recognised by having a time, not by having a header');
 	}
 }

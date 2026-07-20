@@ -118,9 +118,9 @@ export default {
 			this.error = ''
 			try {
 				const page = await fetchMeetings({ limit: PAGE })
-				this.meetings = page.meetings
-				this.nextOffset = page.nextOffset
-				this.hasMore = page.hasMore
+				this.meetings = page.meetings || []
+				this.nextOffset = page.nextOffset || 0
+				this.hasMore = !!page.hasMore
 			} catch (e) {
 				// Say what happened rather than showing an empty list — an
 				// empty list reads as "you have no meetings", which is a
@@ -138,9 +138,9 @@ export default {
 					limit: PAGE,
 					offset: this.nextOffset,
 				})
-				this.meetings = this.meetings.concat(page.meetings)
-				this.nextOffset = page.nextOffset
-				this.hasMore = page.hasMore
+				this.meetings = this.meetings.concat(page.meetings || [])
+				this.nextOffset = page.nextOffset || 0
+				this.hasMore = !!page.hasMore
 			} catch (e) {
 				console.error('failed to load older meetings', e)
 			}
