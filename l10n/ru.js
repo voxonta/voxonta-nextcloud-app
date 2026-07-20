@@ -36,6 +36,8 @@ OC.L10N.register(
         "Recording resumed for this call.": "Запись этого звонка возобновлена.",
         "Recording stopped. Nothing said from now on in this call will be transcribed. Type /запись to resume.": "Запись остановлена. Всё сказанное дальше в этом звонке расшифровываться не будет. Наберите /запись, чтобы возобновить.",
         "Could not reach the transcription service, so recording was not resumed.": "Не удалось связаться с сервисом расшифровки, запись не возобновлена.",
-        "Could not reach the transcription service. Recording may still be running — please ask an administrator.": "Не удалось связаться с сервисом расшифровки. Запись может продолжаться — обратитесь к администратору."
+        "Could not reach the transcription service. Recording may still be running — please ask an administrator.": "Не удалось связаться с сервисом расшифровки. Запись может продолжаться — обратитесь к администратору.",
+        "Who can see the whole archive": "Кому доступен весь архив",
+        "Comma-separated group names, for people who need every call rather than their own — management, HR, audit. Everyone else always sees the meetings they took part in. Leave empty and nobody has this access.": "Названия групп через запятую — для тех, кому нужны все звонки, а не только свои: руководство, HR, аудит. Остальные всегда видят встречи, в которых участвовали. Оставьте пустым — и такого доступа нет ни у кого."
     },
     "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);");

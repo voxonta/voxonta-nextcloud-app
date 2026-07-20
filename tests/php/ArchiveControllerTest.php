@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Tests;
 
 use OCA\DoneTranscription\Controller\ArchiveController;
+use OCA\DoneTranscription\Service\ArchiveAccess;
 use OCA\DoneTranscription\Service\BackendClient;
 use OCA\DoneTranscription\Service\BackendException;
 use OCP\AppFramework\Http;
@@ -21,11 +22,16 @@ use Psr\Log\LoggerInterface;
  * conversations.
  */
 class ArchiveControllerTest extends TestCase {
-	private function controller(BackendClient $backend, ?string $user): ArchiveController {
+	private function controller(BackendClient $backend, ?string $user,
+		bool $seesEverything = false): ArchiveController {
+		$access = $this->createMock(ArchiveAccess::class);
+		$access->method('canSeeEverything')->willReturn($seesEverything);
+
 		return new ArchiveController(
 			'done_transcription',
 			$this->createMock(IRequest::class),
 			$backend,
+			$access,
 			$this->createMock(LoggerInterface::class),
 			$user,
 		);
@@ -136,5 +142,71 @@ class ArchiveControllerTest extends TestCase {
 		$this->assertSame(Http::STATUS_SERVICE_UNAVAILABLE, $response->getStatus(),
 			'an empty list would read as "you have no meetings", which is a '
 			. 'different and misleading statement');
+	}
+
+	public function testAskingForTheWholeArchiveWithoutTheRightReturnsYourOwn(): void {
+		$asked = [];
+		$controller = $this->controller($this->backend([], $asked), 'alice');
+
+		$controller->meetings(scope: 'all');
+
+		$this->assertSame('alice', $asked[0][1]['user'],
+			'scope=all without the right must not widen what is returned');
+	}
+
+	public function testAskingAboutSomeoneElseWithoutTheRightIsIgnored(): void {
+		$asked = [];
+		$controller = $this->controller($this->backend([], $asked), 'alice');
+
+		$controller->meetings(scope: 'all', with: 'bob');
+
+		$this->assertSame('alice', $asked[0][1]['user'],
+			"the 'with' filter became a way to read bob's meetings");
+	}
+
+	public function testTheArchiveGroupCanReadTheWholeArchive(): void {
+		$asked = [];
+		$controller = $this->controller($this->backend([], $asked), 'auditor', true);
+
+		$controller->meetings(scope: 'all');
+
+		$this->assertArrayNotHasKey('user', $asked[0][1],
+			'the whole archive was still filtered to one person');
+	}
+
+	public function testTheArchiveGroupCanAskWhoTalkedToWhom(): void {
+		$asked = [];
+		$controller = $this->controller($this->backend([], $asked), 'auditor', true);
+
+		$controller->meetings(scope: 'all', with: 'bob');
+
+		$this->assertSame('bob', $asked[0][1]['user']);
+	}
+
+	public function testTheArchiveGroupStillDefaultsToItsOwnMeetings(): void {
+		$asked = [];
+		$controller = $this->controller($this->backend([], $asked), 'auditor', true);
+
+		$controller->meetings();
+
+		$this->assertSame('auditor', $asked[0][1]['user'],
+			'having the right must not silently turn every listing into the '
+			. "whole company's calls");
+	}
+
+	public function testTheArchiveGroupCanOpenAMeetingItDidNotAttend(): void {
+		$backend = $this->backend(['session_id' => 's1', 'participants' => ['bob']]);
+		$response = $this->controller($backend, 'auditor', true)->meeting('s1');
+
+		$this->assertSame(Http::STATUS_OK, $response->getStatus());
+	}
+
+	public function testTheFrontendIsToldWhetherTheWiderViewExists(): void {
+		$plain = $this->controller($this->backend(), 'alice')->meetings();
+		$this->assertFalse($plain->getData()['can_see_everything'],
+			'offering the tab to someone who cannot use it means a 403 on click');
+
+		$auditor = $this->controller($this->backend(), 'auditor', true)->meetings();
+		$this->assertTrue($auditor->getData()['can_see_everything']);
 	}
 }

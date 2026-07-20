@@ -29,6 +29,7 @@ class AdminSettings implements IDeclarativeSettingsForm {
 	public const KEY_ENABLED = 'transcription_enabled';
 	public const KEY_ROOM_ALLOWLIST = 'room_allowlist';
 	public const KEY_PUBLISH_TO_CHAT = 'publish_to_chat';
+	public const KEY_ARCHIVE_GROUPS = 'archive_groups';
 
 	public function __construct(
 		private IL10N $l10n,
@@ -74,6 +75,14 @@ class AdminSettings implements IDeclarativeSettingsForm {
 					'description' => $this->l('Comma-separated conversation tokens. Leave empty to transcribe every call. Useful for a pilot: switch it on for one team before rolling it out.'),
 					'type' => DeclarativeSettingsTypes::TEXT,
 					'placeholder' => 'abc123xy, def456uv',
+					'default' => '',
+				],
+				[
+					'id' => self::KEY_ARCHIVE_GROUPS,
+					'title' => $this->l('Who can see the whole archive'),
+					'description' => $this->l('Comma-separated group names, for people who need every call rather than their own — management, HR, audit. Everyone else always sees the meetings they took part in. Leave empty and nobody has this access.'),
+					'type' => DeclarativeSettingsTypes::TEXT,
+					'placeholder' => 'management, hr',
 					'default' => '',
 				],
 				[
