@@ -6,6 +6,7 @@ namespace OCA\DoneTranscription\Service;
 
 use OCP\AppFramework\Http;
 use OCP\Files\File;
+use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Node;
 use Psr\Log\LoggerInterface;
@@ -32,6 +33,16 @@ class FileArchive {
 	private const HEADER = '# Транскрипция:';
 	private const MINUTES_MARKER = 'Протокол';
 
+	/**
+	 * Where the service keeps them, for the account it writes as.
+	 *
+	 * Listing a known folder is one storage operation; searching a whole home
+	 * directory is thousands, and the account that owns the archive is exactly
+	 * the one with the most files. Participants see their calls as shares and
+	 * fall through to the search, which for them covers a handful of files.
+	 */
+	private const FOLDERS = ['Talk/Транскрипции', 'Talk/Протоколы'];
+
 	public function __construct(
 		private IRootFolder $rootFolder,
 		private LoggerInterface $logger,
@@ -44,22 +55,24 @@ class FileArchive {
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0): array {
+		// Candidates are chosen, ordered and paged on filenames alone, and only
+		// then are headers read. Opening every markdown file the user can see
+		// to draw one screen means thousands of storage reads — this instance
+		// has thirteen thousand of them — and the page is fifty rows long.
+		$candidates = $this->transcriptCandidates($userId);
+
+		// Filenames begin with the timestamp, so sorting them reverse-
+		// alphabetically is chronological, without opening anything.
+		usort($candidates, static fn (File $a, File $b) => strcmp($b->getName(), $a->getName()));
+
 		$meetings = [];
-		foreach ($this->markdownFiles($userId) as $file) {
+		foreach (array_slice($candidates, $offset, $limit) as $file) {
 			$meta = $this->transcriptMetadata($file);
 			if ($meta !== null) {
 				$meetings[] = $meta;
 			}
 		}
-
-		usort($meetings, static fn ($a, $b) => $b['sort_key'] <=> $a['sort_key']);
-		return array_map(
-			static function (array $m) {
-				unset($m['sort_key']);
-				return $m;
-			},
-			array_slice($meetings, $offset, $limit),
-		);
+		return $meetings;
 	}
 
 	/**
@@ -73,9 +86,11 @@ class FileArchive {
 
 		foreach ($this->markdownFiles($userId) as $candidate) {
 			$name = $candidate->getName();
-			if ($candidate->getId() === $transcript->getId()
+			// Cheap checks first: the timestamp rules out all but a handful
+			// before anything is opened.
+			if ($this->timestampPrefix($name) !== $prefix
 				|| !str_contains($name, self::MINUTES_MARKER)
-				|| $this->timestampPrefix($name) !== $prefix) {
+				|| $candidate->getId() === $transcript->getId()) {
 				continue;
 			}
 			return $this->contents($candidate);
@@ -97,7 +112,7 @@ class FileArchive {
 	 * @throws BackendException
 	 */
 	private function fileFor(string $userId, string $sessionId): File {
-		foreach ($this->markdownFiles($userId) as $file) {
+		foreach ($this->transcriptCandidates($userId) as $file) {
 			if ($this->sessionId($file) === $sessionId) {
 				return $file;
 			}
@@ -120,11 +135,42 @@ class FileArchive {
 	}
 
 	/**
+	 * Files that could be a transcript, judged by name alone.
+	 *
+	 * The service names them "<timestamp> - <who>.md" and the minutes
+	 * "<timestamp> - Протокол <who>.md". Recognising both from the filename
+	 * costs nothing, and it is what keeps a listing from opening every note the
+	 * user has ever written.
+	 *
+	 * @return File[]
+	 */
+	private function transcriptCandidates(string $userId): array {
+		return array_values(array_filter(
+			$this->markdownFiles($userId),
+			fn (File $file) => $this->timestampPrefix($file->getName()) !== ''
+				&& !str_contains($file->getName(), self::MINUTES_MARKER),
+		));
+	}
+
+	/**
 	 * @return File[]
 	 */
 	private function markdownFiles(string $userId): array {
 		try {
 			$userFolder = $this->rootFolder->getUserFolder($userId);
+		} catch (\Throwable $e) {
+			$this->logger->error('could not open the files of {user}', [
+				'user' => $userId, 'exception' => $e,
+			]);
+			return [];
+		}
+
+		$fromFolders = $this->fromKnownFolders($userFolder);
+		if ($fromFolders !== []) {
+			return $fromFolders;
+		}
+
+		try {
 			$found = $userFolder->searchByMime('text/markdown');
 		} catch (\Throwable $e) {
 			// Show nothing rather than everything, and say why in the log.
@@ -138,6 +184,31 @@ class FileArchive {
 			$found,
 			static fn (Node $node) => $node instanceof File,
 		));
+	}
+
+	/**
+	 * @return File[]
+	 */
+	private function fromKnownFolders(Folder $userFolder): array {
+		$files = [];
+		foreach (self::FOLDERS as $path) {
+			try {
+				$folder = $userFolder->get($path);
+			} catch (\Throwable) {
+				// Absent for everyone but the service account. Not a problem:
+				// their calls arrive as shares and the search finds those.
+				continue;
+			}
+			if (!$folder instanceof Folder) {
+				continue;
+			}
+			foreach ($folder->getDirectoryListing() as $node) {
+				if ($node instanceof File) {
+					$files[] = $node;
+				}
+			}
+		}
+		return $files;
 	}
 
 	/**
@@ -164,9 +235,6 @@ class FileArchive {
 			'call_end_ts' => $end,
 			'participants' => $this->participants($head),
 			'has_transcript' => true,
-			// Filenames start with the timestamp, so they sort chronologically
-			// even for the older files whose header lacks a usable date.
-			'sort_key' => $start > 0 ? (string)$start : $name,
 		];
 	}
 
