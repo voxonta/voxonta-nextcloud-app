@@ -9,6 +9,7 @@ use OCA\DoneTranscription\Service\Search\Comparison;
 use OCA\DoneTranscription\Service\Search\Order;
 use OCA\DoneTranscription\Service\Search\Query;
 use OCP\AppFramework\Http;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
@@ -82,6 +83,17 @@ class FileArchive {
 
 	/** The folder names, for finding a shared-in copy wherever it was mounted. */
 	private const OWN_FOLDER_NAMES = ['Транскрипции', 'Протоколы'];
+
+	/**
+	 * The analyser's tree: <date>/<NNN>_<topic>/{01_…,10_…}.
+	 *
+	 * Where a call is whole — the transcript and the summary in one folder —
+	 * so wherever this is readable it is the archive, and the loose transcripts
+	 * the service also writes are the same calls a second time. They are read
+	 * only for the months before the analyser existed; see cutoff().
+	 */
+	private const ANALYSIS_FOLDER = 'Talk/Аналитика встреч';
+	private const ANALYSIS_FOLDER_NAME = 'Аналитика встреч';
 
 	/**
 	 * Upper bound on transcripts a search returns. Passing 0 for "no limit"
@@ -305,6 +317,14 @@ class FileArchive {
 		// path, because a recipient mounts a shared folder wherever they like —
 		// on this instance the archive lands under /Shares, not Talk/. The
 		// service account owns them outright, so its own paths are tried too.
+		// The analyser's tree first, because it is the archive wherever it is
+		// readable: each call there is whole, and its date decides which of the
+		// loose transcripts below are the same calls said twice.
+		$analysisId = $this->analysisFolderId($userId, $userFolder);
+		if ($analysisId !== null) {
+			$this->addAnalysedCalls($analysisId, $entries);
+		}
+
 		$folderIds = $this->archiveFolderIds($userId, $userFolder);
 		foreach ($folderIds as $folderId) {
 			try {
@@ -354,6 +374,133 @@ class FileArchive {
 			]);
 
 		return $this->cache[$userId] = $entries;
+	}
+
+	/**
+	 * The analyser's folder, if this person can read it whole.
+	 *
+	 * Held outright by the service account and shared as one folder to whoever
+	 * keeps the archive; an ordinary participant has no such folder and reaches
+	 * their calls as individual shares instead.
+	 */
+	private function analysisFolderId(string $userId, Folder $userFolder): ?int {
+		try {
+			$folder = $userFolder->get(self::ANALYSIS_FOLDER);
+			if ($folder instanceof Folder) {
+				return $folder->getId();
+			}
+		} catch (\Throwable) {
+			// Not the owner — look for it among the shares instead.
+		}
+
+		foreach (self::SHARE_TYPES as $type) {
+			try {
+				foreach ($this->shareManager->getSharedWith(
+					$userId, $type, null, self::SHARE_PAGE) as $share) {
+					if ($share->getNodeType() === 'folder'
+						&& basename($share->getTarget()) === self::ANALYSIS_FOLDER_NAME) {
+						return $share->getNodeId();
+					}
+				}
+			} catch (\Throwable $e) {
+				$this->logger->warning('could not read {type} shares for {user}', [
+					'type' => $type, 'user' => $userId, 'exception' => $e,
+				]);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Every analysed call under that folder, in one indexed read.
+	 *
+	 * The tree is three levels deep — <date>/<NNN>_<topic>/<file> — so this
+	 * matches on the path prefix rather than walking parent by parent, which
+	 * would be a query per day and per call. Only the two files that stand for
+	 * a call are taken; the speaker analyses in the same folder are nobody's
+	 * business but their subject's, and this never reads them.
+	 *
+	 * @param array<int, array<string, mixed>> $entries
+	 */
+	private function addAnalysedCalls(int $folderId, array &$entries): void {
+		try {
+			$qb = $this->db->getQueryBuilder();
+			$qb->select('storage', 'path')
+				->from('filecache')
+				->where($qb->expr()->eq('fileid',
+					$qb->createNamedParameter($folderId, IQueryBuilder::PARAM_INT)));
+			$result = $qb->executeQuery();
+			$folder = $result->fetch();
+			$result->closeCursor();
+			if (!$folder) {
+				return;
+			}
+
+			$qb = $this->db->getQueryBuilder();
+			$qb->select('fileid', 'name', 'parent', 'path')
+				->from('filecache')
+				->where($qb->expr()->eq('storage',
+					$qb->createNamedParameter((int)$folder['storage'], IQueryBuilder::PARAM_INT)))
+				->andWhere($qb->expr()->like('path',
+					$qb->createNamedParameter(
+						$this->db->escapeLikeParameter((string)$folder['path']) . '/%')))
+				->andWhere($qb->expr()->in('name',
+					$qb->createNamedParameter(
+						[self::ANALYSIS_SUMMARY . '.md', self::ANALYSIS_TRANSCRIPT . '.md'],
+						IQueryBuilder::PARAM_STR_ARRAY)));
+			$result = $qb->executeQuery();
+			$rows = $result->fetchAll();
+			$result->closeCursor();
+		} catch (\Throwable $e) {
+			$this->logger->warning('could not read the analysed calls', [
+				'exception' => $e,
+			]);
+			return;
+		}
+
+		foreach ($rows as $row) {
+			$id = (int)$row['fileid'];
+			$entry = [
+				'id' => $id,
+				'name' => (string)$row['name'],
+				'node' => null,
+				'share' => null,
+				'folder' => (int)$row['parent'],
+			];
+			if (preg_match(self::ANALYSIS_PATH, (string)$row['path'], $m) === 1) {
+				$entry['sort'] = $m[1] . ' ' . $m[2];
+				$entry['date'] = strtotime($m[1]) ?: 0;
+			}
+			$entries[$id] = $entry;
+		}
+	}
+
+	/**
+	 * The day the analyser's archive begins, as "YYYY-MM-DD", or '' if this
+	 * person has no analysed calls at all.
+	 *
+	 * From there on, a call is read from the analyser's folder — transcript and
+	 * summary together — and the loose transcript of the same call is the same
+	 * meeting listed twice. Before it there is no analysis, so the loose
+	 * transcripts and their "Протокол" minutes are the whole archive. The date
+	 * is taken from the data rather than written down, so it stays true if the
+	 * analyser is ever re-run over older calls.
+	 *
+	 * @param array<int, array<string, mixed>> $entries
+	 */
+	private function cutoff(array $entries): string {
+		$earliest = '';
+		foreach ($entries as $entry) {
+			$sort = (string)($entry['sort'] ?? '');
+			if ($sort === '' || !isset($entry['folder'])) {
+				continue;
+			}
+			$day = substr($sort, 0, 10);
+			if ($earliest === '' || $day < $earliest) {
+				$earliest = $day;
+			}
+		}
+		return $earliest;
 	}
 
 	/**
@@ -476,7 +623,7 @@ class FileArchive {
 				->from('filecache')
 				->where($qb->expr()->in('fileid',
 					$qb->createNamedParameter($ids,
-						\OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)));
+						IQueryBuilder::PARAM_INT_ARRAY)));
 			$result = $qb->executeQuery();
 			$rows = $result->fetchAll();
 			$result->closeCursor();
@@ -521,7 +668,7 @@ class FileArchive {
 		$qb->select('fileid', 'name')
 			->from('filecache')
 			->where($qb->expr()->eq('parent',
-				$qb->createNamedParameter($parentId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+				$qb->createNamedParameter($parentId, IQueryBuilder::PARAM_INT)))
 			->andWhere($qb->expr()->like('name',
 				$qb->createNamedParameter(self::NAME_PATTERN)));
 		$result = $qb->executeQuery();
@@ -580,6 +727,7 @@ class FileArchive {
 	 */
 	private function transcriptCandidates(string $userId): array {
 		$candidates = $this->candidates($userId);
+		$cutoff = $this->cutoff($candidates);
 
 		// Which meeting folders have their transcript shared. For the months
 		// before the service began sharing it, none do — and those calls are in
@@ -595,6 +743,13 @@ class FileArchive {
 		$transcripts = [];
 		foreach ($candidates as $id => $entry) {
 			if ($this->looksLikeTranscript($entry['name'])) {
+				// A loose transcript from a day the analyser covers is that same
+				// call a second time, without its summary. The analysed copy is
+				// the one that gets listed.
+				if (!isset($entry['folder']) && $cutoff !== ''
+					&& substr($entry['name'], 0, 10) >= $cutoff) {
+					continue;
+				}
 				$transcripts[$id] = $entry;
 			} elseif (str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)
 				&& isset($entry['folder'])

@@ -66,7 +66,7 @@ class FileArchiveTest extends TestCase {
 	 */
 	private function archive(array $files, ?string &$askedFor = null,
 		bool $lookupThrows = false, bool $viaShare = false,
-		array $index = []): FileArchive {
+		array $index = [], bool $analysisFolder = false): FileArchive {
 		$nodes = [];
 		$shares = [];
 		$rows = [];
@@ -95,9 +95,18 @@ class FileArchiveTest extends TestCase {
 		$folder = $this->createMock(Folder::class);
 		$folder->method('getId')->willReturn(1);
 
+		// The analyser's folder, when the test says this person can read it
+		// whole — the account that keeps the archive, as against a participant
+		// who only holds shares of single files.
+		$analysis = $this->createMock(Folder::class);
+		$analysis->method('getId')->willReturn(2);
+
 		$userFolder = $this->createMock(Folder::class);
 		$userFolder->method('get')->willReturnCallback(
-			function (string $path) use ($folder, $viaShare) {
+			function (string $path) use ($folder, $analysis, $viaShare, $analysisFolder) {
+				if ($analysisFolder && $path === 'Talk/Аналитика встреч') {
+					return $analysis;
+				}
 				if (!$viaShare && $path === 'Talk/Транскрипции') {
 					return $folder;
 				}
@@ -151,30 +160,49 @@ class FileArchiveTest extends TestCase {
 		$qb = $this->createMock(\OCP\DB\QueryBuilder\IQueryBuilder::class);
 		$expr = $this->createMock(\OCP\DB\QueryBuilder\IExpressionBuilder::class);
 		$qb->method('expr')->willReturn($expr);
-		foreach (['select', 'from', 'where', 'andWhere', 'orderBy'] as $m) {
+		foreach (['from', 'where', 'andWhere', 'orderBy'] as $m) {
 			$qb->method($m)->willReturn($qb);
 		}
+		// Which columns were asked for is what tells the queries apart, the way
+		// the real ones differ: the folder's own row, the analysed calls under
+		// it, and the plain listing of a folder.
+		$selected = [];
+		$qb->method('select')->willReturnCallback(
+			function (...$cols) use ($qb, &$selected) {
+				$selected = $cols;
+				return $qb;
+			});
 		$qb->method('createNamedParameter')->willReturn('?');
 
+		// Every fixture as an index row, with whatever the test said about where
+		// it sits.
+		$all = array_map(static fn (File $f) => [
+			'fileid' => $f->getId(),
+			'name' => $f->getName(),
+		] + ($rows[$f->getId()] ?? []), $nodes);
+		foreach ($shares as $share) {
+			$id = $share->getNodeId();
+			$all[] = ['fileid' => $id, 'name' => ''] + ($rows[$id] ?? []);
+		}
+
 		$result = $this->createMock(\OCP\DB\IResult::class);
+		$result->method('fetch')->willReturnCallback(
+			static fn () => $selected === ['storage', 'path']
+				? ['storage' => 1, 'path' => 'files/Talk/Аналитика встреч']
+				: false);
 		$result->method('fetchAll')->willReturnCallback(
-			function () use ($nodes, $throws, $rows, $shares) {
+			static function () use ($all, $throws, &$selected) {
 				if ($throws) {
 					throw new \RuntimeException('storage down');
 				}
-				// The real query answers about whatever it was asked; these rows
-				// stand in for both the folder listing and the lookup of the
-				// analysed files, shared-in ones included.
-				$out = array_map(static fn (File $f) => [
-					'fileid' => $f->getId(),
-					'name' => $f->getName(),
-				] + ($rows[$f->getId()] ?? []), $nodes);
-				foreach ($shares as $share) {
-					$id = $share->getNodeId();
-					$out[] = ['fileid' => $id, 'name' => '']
-						+ ($rows[$id] ?? []);
+				// The analysed calls are those the test placed under the
+				// analyser's tree; the other queries see everything, as the
+				// folder listing does.
+				if ($selected === ['fileid', 'name', 'parent', 'path']) {
+					return array_values(array_filter($all, static fn (array $r) =>
+						str_contains((string)($r['path'] ?? ''), 'Аналитика встреч')));
 				}
-				return $out;
+				return $all;
 			});
 		$qb->method('executeQuery')->willReturn($result);
 		return $qb;
@@ -584,5 +612,73 @@ class FileArchiveTest extends TestCase {
 
 		$this->assertCount(1, $archive->list('alice', 50, 0, 'обработчика')['meetings']);
 		$this->assertSame([], $archive->list('alice', 50, 0, 'Superset')['meetings']);
+	}
+
+	// ── the analyser's folder as the archive ───────────────────────────────
+	public function testTheAnalysersFolderGivesTheCallWhole(): void {
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary.md' => self::SUMMARY,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		], analysisFolder: true);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings, 'the pair is one call, not two');
+		$this->assertTrue($meetings[0]['has_transcript']);
+		$this->assertStringContainsString('Решили передать задачу',
+			$archive->summary('alice', $meetings[0]['session_id']));
+	}
+
+	public function testALooseTranscriptOfAnAnalysedDayIsNotListedTwice(): void {
+		// The service writes both: the analysed copy and the loose transcript.
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary.md' => self::SUMMARY,
+			'2026-07-20 09-31-08 - ППортал • Дейли.md' => self::YAML,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		], analysisFolder: true);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('ППортал • Дейли', $meetings[0]['room_name'],
+			'the analysed copy is the one kept — it has a summary');
+	}
+
+	public function testCallsFromBeforeTheAnalyserAreStillListed(): void {
+		// The months the analyser did not cover are the loose transcripts and
+		// their "Протокол" minutes, and nothing may drop them.
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+			'2026-03-05 14-49-00 - Протокол Вадим Куницын.md' => self::MINUTES,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		], analysisFolder: true);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(2, $meetings);
+		$old = $meetings[1];
+		$this->assertSame('Вадим Куницын', $old['room_name']);
+		$this->assertStringContainsString('Решили выкатывать',
+			$archive->summary('alice', $old['session_id']),
+			'the old minutes still pair by timestamp');
+	}
+
+	public function testWithoutAnalysisNothingIsHidden(): void {
+		// A participant with no analysed calls at all: the cutoff must not
+		// swallow their archive.
+		$archive = $this->archive([
+			'2026-07-20 09-31-08 - Superset.md' => self::YAML,
+			'2026-03-05 14-49-00 - Вадим Куницын.md' => self::TRANSCRIPT,
+		]);
+
+		$this->assertCount(2, $archive->list('alice')['meetings']);
 	}
 }
