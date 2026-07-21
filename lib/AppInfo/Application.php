@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\AppInfo;
 
 use OCA\DoneTranscription\Listener\BotListener;
+use OCA\DoneTranscription\Listener\CallListener;
 use OCA\DoneTranscription\Settings\AdminSettings;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
@@ -37,6 +38,20 @@ class Application extends App implements IBootstrap {
 				'\OCA\Talk\Events\BotInvokeEvent',
 				BotListener::class,
 			);
+		}
+
+		// What replaces reading Nextcloud's database over an SSH tunnel: Talk
+		// says when a call starts and ends, and the capture service asks us.
+		// Registered by name for the same reason as above — the app installs on
+		// an instance without Talk, where these classes do not exist.
+		foreach ([
+			'\OCA\Talk\Events\CallStartedEvent',
+			'\OCA\Talk\Events\CallEndedEvent',
+			'\OCA\Talk\Events\CallEndedForEveryoneEvent',
+		] as $event) {
+			if (class_exists($event)) {
+				$context->registerEventListener($event, CallListener::class);
+			}
 		}
 	}
 

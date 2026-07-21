@@ -20,6 +20,7 @@ return [
 		// The transcription service, authenticating with the shared secret from
 		// the admin settings rather than as a user.
 		['name' => 'service#config', 'url' => '/api/v1/service/config', 'verb' => 'GET'],
+		['name' => 'service#calls', 'url' => '/api/v1/service/calls', 'verb' => 'GET'],
 		['name' => 'service#heartbeat', 'url' => '/api/v1/service/heartbeat', 'verb' => 'POST'],
 	],
 ];

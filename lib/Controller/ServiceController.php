@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\DoneTranscription\Controller;
 
+use OCA\DoneTranscription\Service\ActiveCalls;
 use OCA\DoneTranscription\Service\ServiceConfig;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
@@ -27,6 +28,7 @@ class ServiceController extends Controller {
 		string $appName,
 		IRequest $request,
 		private ServiceConfig $config,
+		private ActiveCalls $calls,
 		private LoggerInterface $logger,
 	) {
 		parent::__construct($appName, $request);
@@ -42,6 +44,22 @@ class ServiceController extends Controller {
 			return $this->refuse();
 		}
 		return new JSONResponse($this->config->forService());
+	}
+
+	/**
+	 * The calls happening right now, for the service to join.
+	 *
+	 * Polled rather than pushed: the capture service runs inside the customer's
+	 * network and need not be reachable from outside, while Nextcloud is
+	 * reachable by definition.
+	 */
+	#[PublicPage]
+	#[NoCSRFRequired]
+	public function calls(): JSONResponse {
+		if (!$this->authorised()) {
+			return $this->refuse();
+		}
+		return new JSONResponse(['calls' => $this->calls->current()]);
 	}
 
 	/**
