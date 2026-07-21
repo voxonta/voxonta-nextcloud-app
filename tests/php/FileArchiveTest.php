@@ -148,8 +148,14 @@ class FileArchiveTest extends TestCase {
 		$users = $this->createMock(IUserManager::class);
 		$users->method('get')->willReturn($this->createMock(IUser::class));
 
+		// A cache that keeps nothing: every test reads the fixtures it wrote,
+		// and a header parsed in one test must not answer another.
+		$cache = $this->createMock(\OCP\ICacheFactory::class);
+		$cache->method('createDistributed')->willReturn(
+			$this->createMock(\OCP\ICache::class));
+
 		return new FileArchive($root, $shareManager, $users, $db,
-			$this->createMock(LoggerInterface::class));
+			$this->createMock(LoggerInterface::class), $cache);
 	}
 
 	/**

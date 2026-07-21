@@ -17,6 +17,7 @@ use OCP\Files\Node;
 use OCP\Files\Search\ISearchBinaryOperator;
 use OCP\Files\Search\ISearchComparison;
 use OCP\Files\Search\ISearchOrder;
+use OCP\ICacheFactory;
 use OCP\IDBConnection;
 use OCP\IUserManager;
 use OCP\Share\IManager;
@@ -131,7 +132,20 @@ class FileArchive {
 		private IUserManager $userManager,
 		private IDBConnection $db,
 		private LoggerInterface $logger,
+		private ICacheFactory $cacheFactory,
 	) {
+	}
+
+	/**
+	 * Parsed headers, kept between requests.
+	 *
+	 * Reading one is a file open through the storage layer — some 30ms — and a
+	 * page is fifty of them, which is the whole cost of the list. The files
+	 * never change once written, so a parse holds for as long as the cache
+	 * keeps it, and only the first visit pays.
+	 */
+	private function headerCache(): \OCP\ICache {
+		return $this->cacheFactory->createDistributed('done_transcription_headers');
 	}
 
 	/**
@@ -847,6 +861,24 @@ class FileArchive {
 	 * @return array<string, mixed>|null null when this is not a transcript
 	 */
 	private function transcriptMetadata(File $file, bool $summaryOnly = false): ?array {
+		$cache = $this->headerCache();
+		$key = ($summaryOnly ? 's' : 't') . $file->getId();
+		$cached = $cache->get($key);
+		if (is_array($cached)) {
+			return $cached === [] ? null : $cached;
+		}
+
+		$meta = $this->readMetadata($file, $summaryOnly);
+		// The negative answer is worth keeping too: without it every listing
+		// re-opens the same files that turned out not to be calls.
+		$cache->set($key, $meta ?? [], 30 * 24 * 3600);
+		return $meta;
+	}
+
+	/**
+	 * @return array<string, mixed>|null
+	 */
+	private function readMetadata(File $file, bool $summaryOnly): ?array {
 		$head = $this->head($file);
 		if ($head === null) {
 			return null;
