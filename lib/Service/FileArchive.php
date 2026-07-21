@@ -484,13 +484,21 @@ class FileArchive {
 	public function warmUp(int $limit): int {
 		try {
 			$qb = $this->db->getQueryBuilder();
+			// Both shapes a call can take: the analyser's pair, and the dated
+			// transcripts of the months before it. A search spans the whole
+			// archive, so warming only half of it still left the first one
+			// reading a thousand files.
 			$qb->select('f.fileid', 'f.name', 's.id')
 				->from('filecache', 'f')
 				->innerJoin('f', 'storages', 's', 'f.storage = s.numeric_id')
-				->where($qb->expr()->in('f.name',
-					$qb->createNamedParameter(
-						[self::ANALYSIS_SUMMARY . '.md', self::ANALYSIS_TRANSCRIPT . '.md'],
-						IQueryBuilder::PARAM_STR_ARRAY)));
+				->where($qb->expr()->orX(
+					$qb->expr()->in('f.name',
+						$qb->createNamedParameter(
+							[self::ANALYSIS_SUMMARY . '.md', self::ANALYSIS_TRANSCRIPT . '.md'],
+							IQueryBuilder::PARAM_STR_ARRAY)),
+					$qb->expr()->like('f.name',
+						$qb->createNamedParameter(self::NAME_PATTERN)),
+				));
 			$result = $qb->executeQuery();
 			$rows = $result->fetchAll();
 			$result->closeCursor();
@@ -509,7 +517,13 @@ class FileArchive {
 				break;
 			}
 			$id = (int)$row['fileid'];
-			$summaryOnly = str_starts_with((string)$row['name'], self::ANALYSIS_SUMMARY);
+			$name = (string)$row['name'];
+			// The minutes are not a call of their own; they are read only when
+			// the call they belong to is opened.
+			if (str_contains($name, self::MINUTES_MARKER)) {
+				continue;
+			}
+			$summaryOnly = str_starts_with($name, self::ANALYSIS_SUMMARY);
 			$key = ($summaryOnly ? 's' : 't') . $id;
 			if ($cache->get($key) !== null) {
 				continue;
