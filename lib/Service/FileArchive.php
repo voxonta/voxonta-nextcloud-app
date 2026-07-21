@@ -126,6 +126,9 @@ class FileArchive {
 	/** @var array<string, array<int, array{id: int, name: string, node: ?File, share: ?IShare}>> */
 	private array $cache = [];
 
+	/** @var array<string, IShare[]> every share held, read once per request */
+	private array $shares = [];
+
 	public function __construct(
 		private IRootFolder $rootFolder,
 		private IManager $shareManager,
@@ -186,9 +189,7 @@ class FileArchive {
 				break;
 			}
 			$scanned++;
-			$file = $this->resolve($userId, $entry);
-			$meta = $file === null ? null
-				: $this->transcriptMetadata($file, isset($entry['summary_only']));
+			$meta = $this->metadataFor($userId, $entry);
 			if ($meta !== null) {
 				$meetings[] = $meta;
 				$day = $this->day($entry);
@@ -404,6 +405,51 @@ class FileArchive {
 	}
 
 	/**
+	 * Every share this person holds, read once.
+	 *
+	 * Three things are wanted from the same list — the analyser's folder, the
+	 * older archive folders, and the individual files — and asking the share
+	 * manager for each of them separately meant walking every Talk
+	 * conversation three times.
+	 *
+	 * @return IShare[]
+	 */
+	private function sharesOf(string $userId): array {
+		if (isset($this->shares[$userId])) {
+			return $this->shares[$userId];
+		}
+
+		$shares = [];
+		foreach (self::SHARE_TYPES as $type) {
+			$offset = 0;
+			// Advance by however many actually came back, and stop only when a
+			// page is empty. The count cannot be compared to the requested
+			// limit: Talk's share provider returns fewer than asked without that
+			// meaning the end. GUARD caps the loop if a provider ignored the
+			// offset and kept returning the same page.
+			for ($guard = 0; $guard < self::PAGE_GUARD; $guard++) {
+				try {
+					$page = $this->shareManager->getSharedWith(
+						$userId, $type, null, self::SHARE_PAGE, $offset);
+				} catch (\Throwable $e) {
+					$this->logger->warning('could not read {type} shares for {user}', [
+						'type' => $type, 'user' => $userId, 'exception' => $e,
+					]);
+					break;
+				}
+				if ($page === []) {
+					break;
+				}
+				foreach ($page as $share) {
+					$shares[] = $share;
+				}
+				$offset += count($page);
+			}
+		}
+		return $this->shares[$userId] = $shares;
+	}
+
+	/**
 	 * The day a candidate belongs to, "YYYY-MM-DD": from the analyser's path,
 	 * or from the filename of a loose transcript.
 	 *
@@ -430,19 +476,10 @@ class FileArchive {
 			// Not the owner — look for it among the shares instead.
 		}
 
-		foreach (self::SHARE_TYPES as $type) {
-			try {
-				foreach ($this->shareManager->getSharedWith(
-					$userId, $type, null, self::SHARE_PAGE) as $share) {
-					if ($share->getNodeType() === 'folder'
-						&& basename($share->getTarget()) === self::ANALYSIS_FOLDER_NAME) {
-						return $share->getNodeId();
-					}
-				}
-			} catch (\Throwable $e) {
-				$this->logger->warning('could not read {type} shares for {user}', [
-					'type' => $type, 'user' => $userId, 'exception' => $e,
-				]);
+		foreach ($this->sharesOf($userId) as $share) {
+			if ($share->getNodeType() === 'folder'
+				&& basename($share->getTarget()) === self::ANALYSIS_FOLDER_NAME) {
+				return $share->getNodeId();
 			}
 		}
 		return null;
@@ -566,20 +603,11 @@ class FileArchive {
 		}
 
 		// Shared-in copies, found by folder name among the shares.
-		foreach (self::SHARE_TYPES as $type) {
-			try {
-				foreach ($this->shareManager->getSharedWith(
-					$userId, $type, null, self::SHARE_PAGE) as $share) {
-					if ($share->getNodeType() === 'folder'
-						&& in_array(basename($share->getTarget()),
-							self::OWN_FOLDER_NAMES, true)) {
-						$ids[$share->getNodeId()] = true;
-					}
-				}
-			} catch (\Throwable $e) {
-				$this->logger->warning('could not read {type} shares for {user}', [
-					'type' => $type, 'user' => $userId, 'exception' => $e,
-				]);
+		foreach ($this->sharesOf($userId) as $share) {
+			if ($share->getNodeType() === 'folder'
+				&& in_array(basename($share->getTarget()),
+					self::OWN_FOLDER_NAMES, true)) {
+				$ids[$share->getNodeId()] = true;
 			}
 		}
 
@@ -592,41 +620,18 @@ class FileArchive {
 	 * @param array<int, array{id: int, name: string, node: ?File, share: ?IShare}> $entries
 	 */
 	private function addFileShares(string $userId, array &$entries): void {
-		foreach (self::SHARE_TYPES as $type) {
-			$offset = 0;
-			// Advance by however many actually came back, and stop only when a
-			// page is empty. The count cannot be compared to the requested
-			// limit: Talk's share provider returns fewer than asked without that
-			// meaning the end. GUARD caps the loop if a provider ignored the
-			// offset and kept returning the same page.
-			for ($guard = 0; $guard < self::PAGE_GUARD; $guard++) {
-				try {
-					$shares = $this->shareManager->getSharedWith(
-						$userId, $type, null, self::SHARE_PAGE, $offset);
-				} catch (\Throwable $e) {
-					$this->logger->warning('could not read {type} shares for {user}', [
-						'type' => $type, 'user' => $userId, 'exception' => $e,
-					]);
-					break;
-				}
-				if ($shares === []) {
-					break;
-				}
-				foreach ($shares as $share) {
-					if ($share->getNodeType() !== 'file') {
-						continue;
-					}
-					$id = $share->getNodeId();
-					if (!isset($entries[$id])) {
-						$entries[$id] = [
-							'id' => $id,
-							'name' => basename($share->getTarget()),
-							'node' => null,
-							'share' => $share,
-						];
-					}
-				}
-				$offset += count($shares);
+		foreach ($this->sharesOf($userId) as $share) {
+			if ($share->getNodeType() !== 'file') {
+				continue;
+			}
+			$id = $share->getNodeId();
+			if (!isset($entries[$id])) {
+				$entries[$id] = [
+					'id' => $id,
+					'name' => basename($share->getTarget()),
+					'node' => null,
+					'share' => $share,
+				];
 			}
 		}
 	}
@@ -860,18 +865,34 @@ class FileArchive {
 	 *
 	 * @return array<string, mixed>|null null when this is not a transcript
 	 */
-	private function transcriptMetadata(File $file, bool $summaryOnly = false): ?array {
+	/**
+	 * What a candidate says about its call — from the cache when possible.
+	 *
+	 * The file id is enough to answer from the cache, so the File is built only
+	 * on a miss. Building one means resolving a mount per row, which for a page
+	 * of fifty was most of the time spent even when nothing had to be read.
+	 *
+	 * @param array<string, mixed> $entry
+	 * @return array<string, mixed>|null
+	 */
+	private function metadataFor(string $userId, array $entry): ?array {
+		$summaryOnly = isset($entry['summary_only']);
 		$cache = $this->headerCache();
-		$key = ($summaryOnly ? 's' : 't') . $file->getId();
+		$key = ($summaryOnly ? 's' : 't') . (int)$entry['id'];
+
 		$cached = $cache->get($key);
 		if (is_array($cached)) {
 			return $cached === [] ? null : $cached;
 		}
 
-		$meta = $this->readMetadata($file, $summaryOnly);
+		$file = $this->resolve($userId, $entry);
+		$meta = $file === null ? null : $this->readMetadata($file, $summaryOnly);
 		// The negative answer is worth keeping too: without it every listing
-		// re-opens the same files that turned out not to be calls.
-		$cache->set($key, $meta ?? [], 30 * 24 * 3600);
+		// re-opens the same files that turned out not to be calls. A file that
+		// could not be resolved is not cached — that may be a passing failure.
+		if ($file !== null) {
+			$cache->set($key, $meta ?? [], 30 * 24 * 3600);
+		}
 		return $meta;
 	}
 
