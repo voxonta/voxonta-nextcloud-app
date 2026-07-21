@@ -34,6 +34,18 @@ class FileArchiveTest extends TestCase {
 
 	private const MINUTES = "# Протокол\n\nРешили выкатывать.\n";
 
+	/** The analyser's own header: no started_at, unindented participants. */
+	private const ANALYSIS = "---\ndate: 2026-07-20\n"
+		. "duration: 19 min\n"
+		. "finished_at: 2026-07-20 06:50:33+00:00\n"
+		. "meeting_name: ППортал • Дейли\n"
+		. "participants:\n- Александр Лимонов\n- Анатолий Хватиков\n"
+		. "source_file: \"2026-07-20 09-31-08 - ППортал • Дейли.md\"\n---\n\n"
+		. "[00:05] **Александр Лимонов:** начнём\n";
+
+	private const SUMMARY = "---\nmeeting_date: '2026-07-20'\n---\n\n"
+		. "# Executive Summary\n\nРешили передать задачу.\n";
+
 	private const YAML = "---\ndate: 2026-07-20\n"
 		. "started_at: 2026-07-20T14:00:23Z\n"
 		. "finished_at: 2026-07-20T14:40:23Z\n"
@@ -47,9 +59,11 @@ class FileArchiveTest extends TestCase {
 	 * @param array<string, string> $files filename => content
 	 */
 	private function archive(array $files, ?string &$askedFor = null,
-		bool $lookupThrows = false, bool $viaShare = false): FileArchive {
+		bool $lookupThrows = false, bool $viaShare = false,
+		array $index = []): FileArchive {
 		$nodes = [];
 		$shares = [];
+		$rows = [];
 		foreach ($files as $name => $content) {
 			$file = $this->file($name, $content);
 			if ($viaShare) {
@@ -57,6 +71,10 @@ class FileArchiveTest extends TestCase {
 			} else {
 				$nodes[] = $file;
 			}
+			// What the file index says about this file. The analyser's files
+			// have a meeting folder and a dated path there; nothing else does.
+			$rows[$file->getId()] = ($index[$name] ?? [])
+				+ ['parent' => 1, 'path' => 'files/' . $name];
 		}
 
 		// The archive folder holds the files, unless the test routes them
@@ -99,7 +117,8 @@ class FileArchiveTest extends TestCase {
 		// the fixtures as rows, unless the lookup is set to fail.
 		$db = $this->createMock(\OCP\IDBConnection::class);
 		$db->method('getQueryBuilder')->willReturnCallback(
-			fn () => $this->queryBuilder($nodes, $lookupThrows));
+			fn () => $this->queryBuilder($nodes, $lookupThrows, $rows,
+				$viaShare ? $shares : []));
 
 		$shareManager = $this->createMock(IManager::class);
 		$shareManager->method('getSharedWith')->willReturnCallback(
@@ -121,25 +140,35 @@ class FileArchiveTest extends TestCase {
 	/**
 	 * @param File[] $nodes
 	 */
-	private function queryBuilder(array $nodes, bool $throws): \OCP\DB\QueryBuilder\IQueryBuilder {
+	private function queryBuilder(array $nodes, bool $throws, array $rows = [],
+		array $shares = []): \OCP\DB\QueryBuilder\IQueryBuilder {
 		$qb = $this->createMock(\OCP\DB\QueryBuilder\IQueryBuilder::class);
 		$expr = $this->createMock(\OCP\DB\QueryBuilder\IExpressionBuilder::class);
 		$qb->method('expr')->willReturn($expr);
-		foreach (['select', 'from', 'where', 'andWhere'] as $m) {
+		foreach (['select', 'from', 'where', 'andWhere', 'orderBy'] as $m) {
 			$qb->method($m)->willReturn($qb);
 		}
 		$qb->method('createNamedParameter')->willReturn('?');
 
 		$result = $this->createMock(\OCP\DB\IResult::class);
 		$result->method('fetchAll')->willReturnCallback(
-			function () use ($nodes, $throws) {
+			function () use ($nodes, $throws, $rows, $shares) {
 				if ($throws) {
 					throw new \RuntimeException('storage down');
 				}
-				return array_map(static fn (File $f) => [
+				// The real query answers about whatever it was asked; these rows
+				// stand in for both the folder listing and the lookup of the
+				// analysed files, shared-in ones included.
+				$out = array_map(static fn (File $f) => [
 					'fileid' => $f->getId(),
 					'name' => $f->getName(),
-				], $nodes);
+				] + ($rows[$f->getId()] ?? []), $nodes);
+				foreach ($shares as $share) {
+					$id = $share->getNodeId();
+					$out[] = ['fileid' => $id, 'name' => '']
+						+ ($rows[$id] ?? []);
+				}
+				return $out;
 			});
 		$qb->method('executeQuery')->willReturn($result);
 		return $qb;
@@ -380,5 +409,111 @@ class FileArchiveTest extends TestCase {
 
 		$from = strtotime('2026-07-01');
 		$this->assertCount(1, $archive->list('alice', 50, 0, '', $from, 0)['meetings']);
+	}
+
+	/**
+	 * A meeting folder in the analyser's tree, as the file index sees it.
+	 */
+	private function meetingFolder(int $id, string $date, string $seq): array {
+		return ['parent' => $id,
+			'path' => "files/Talk/Аналитика встреч/$date/{$seq}_planerka/x.md"];
+	}
+
+	public function testAnAnalysedCallIsListed(): void {
+		$archive = $this->archive(
+			['10_Original_Transcript.md' => self::ANALYSIS],
+			index: ['10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('ППортал • Дейли', $meetings[0]['room_name']);
+		$this->assertSame(['Александр Лимонов', 'Анатолий Хватиков'],
+			$meetings[0]['participants']);
+		$this->assertSame(19 * 60,
+			$meetings[0]['call_end_ts'] - $meetings[0]['call_start_ts'],
+			'the analyser states the end and the length, never the start');
+	}
+
+	public function testTheSummaryIsTheFileInTheSameMeetingFolder(): void {
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary.md' => self::SUMMARY,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		]);
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
+
+		$this->assertStringContainsString('Решили передать задачу',
+			$archive->summary('alice', $id));
+	}
+
+	public function testASummaryFromAnotherMeetingIsNotAttached(): void {
+		// Both arrive flat in Talk/ with the same name bar a suffix, so only the
+		// meeting folder tells them apart.
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary (2).md' => self::SUMMARY,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary (2).md' => $this->meetingFolder(9, '2026-07-19', '002'),
+		]);
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
+
+		$this->assertSame('', $archive->summary('alice', $id),
+			'pairing on the mounted name shows a stranger the wrong call');
+	}
+
+	public function testAnalysedCallsAreOrderedByTheirMeetingFolder(): void {
+		// Identical filenames: nothing but the index can order these.
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'10_Original_Transcript (2).md' => str_replace(
+				'2026-07-20', '2026-06-01', self::ANALYSIS),
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'10_Original_Transcript (2).md' => $this->meetingFolder(9, '2026-06-01', '001'),
+		]);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(2, $meetings);
+		$this->assertGreaterThan($meetings[1]['call_start_ts'],
+			$meetings[0]['call_start_ts']);
+	}
+
+	public function testADateFilterUsesTheMeetingFolderNotTheFilename(): void {
+		$archive = $this->archive(
+			['10_Original_Transcript.md' => self::ANALYSIS],
+			index: ['10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$this->assertCount(1, $archive->list('alice', 50, 0, '',
+			strtotime('2026-07-01'), strtotime('2026-07-31'))['meetings']);
+		$this->assertSame([], $archive->list('alice', 50, 0, '',
+			strtotime('2026-03-01'), strtotime('2026-03-31'))['meetings']);
+	}
+
+	public function testSearchingAnAnalysedCallReadsItsHeader(): void {
+		$archive = $this->archive(
+			['10_Original_Transcript.md' => self::ANALYSIS],
+			index: ['10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$this->assertCount(1, $archive->list('alice', 50, 0, 'Лимонов')['meetings'],
+			'the mounted filename holds neither the meeting nor the people');
+		$this->assertSame([], $archive->list('alice', 50, 0, 'Superset')['meetings']);
+	}
+
+	public function testTheOtherAnalysisFilesAreNotCalls(): void {
+		$archive = $this->archive([
+			'04_Meeting_Dynamics.md' => self::SUMMARY,
+			'01_Executive_Summary.md' => self::SUMMARY,
+		]);
+
+		$this->assertSame([], $archive->list('alice')['meetings'],
+			'only the transcript stands for a call in the list');
 	}
 }

@@ -45,6 +45,26 @@ class FileArchive {
 	private const MINUTES_MARKER = 'Протокол';
 
 	/**
+	 * The analyser's own filenames. It writes a folder per call holding a dozen
+	 * files and the service shares exactly two of them; the rest (speaker
+	 * analysis, meeting dynamics) stays unshared and never reaches this code.
+	 *
+	 * Prefixes, not exact names: a recipient mounts every one of them flat into
+	 * Talk/, so the second call's summary arrives as
+	 * "01_Executive_Summary (33).md". Which is also why the two are paired by
+	 * their folder in the file index rather than by anything in the name.
+	 */
+	private const ANALYSIS_SUMMARY = '01_Executive_Summary';
+	private const ANALYSIS_TRANSCRIPT = '10_Original_Transcript';
+
+	/**
+	 * Where a call sits in the analyser's tree: ".../2026-07-21/004_status-…".
+	 * The date orders the archive and answers a date filter, and the number
+	 * orders the calls within a day — neither is in the recipient's filename.
+	 */
+	private const ANALYSIS_PATH = '#/(\d{4}-\d{2}-\d{2})/(\d+)_#';
+
+	/**
 	 * A transcript's filename starts with a date: "2026-03-24 …". The `_`
 	 * matches exactly one character, so this is the shape of a date and not
 	 * merely "starts with 20" — the looser form also matched prompt files named
@@ -123,7 +143,7 @@ class FileArchive {
 		if ($query !== '' || $from !== 0 || $to !== 0) {
 			$candidates = array_values(array_filter(
 				$candidates,
-				fn (array $e) => $this->matchesFilter($e['name'], $query, $from, $to),
+				fn (array $e) => $this->matchesFilter($userId, $e, $query, $from, $to),
 			));
 		}
 		$tHeaders = microtime(true);
@@ -165,7 +185,31 @@ class FileArchive {
 	 * @throws BackendException
 	 */
 	public function summary(string $userId, string $sessionId): string {
+		$candidates = $this->candidates($userId);
+		$entry = $candidates[(int)$sessionId] ?? null;
+
+		// Analyser output: the summary is the file that sits in the same meeting
+		// folder. The folder is known from the file index, not from the mounted
+		// name — a recipient's copies are all flat in Talk/ with the meeting
+		// nowhere in the name, so pairing on names would attach a stranger's
+		// summary to this call.
+		if ($entry !== null && str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)) {
+			$folder = $entry['folder'] ?? 0;
+			foreach ($folder === 0 ? [] : $candidates as $other) {
+				if (($other['folder'] ?? 0) === $folder
+					&& str_starts_with($other['name'], self::ANALYSIS_SUMMARY)) {
+					$file = $this->resolve($userId, $other);
+					return $file === null ? '' : $this->contents($file);
+				}
+			}
+			// A transcript with no summary shared beside it. Not an error.
+			return '';
+		}
+
 		$transcript = $this->fileFor($userId, $sessionId);
+
+		// Older calls: minutes are a separate file whose name starts with the
+		// same timestamp as the transcript.
 		$prefix = $this->timestampPrefix($transcript->getName());
 		if ($prefix === '') {
 			return '';
@@ -282,6 +326,10 @@ class FileArchive {
 		// conversation, which an archive folder does not cover.
 		$this->addFileShares($userId, $entries);
 
+		// The analyser's files carry nothing in their mounted name, so what
+		// orders them and pairs them comes from the index.
+		$this->annotateAnalysis($entries);
+
 		$this->logger->debug('candidate files for {user}: {folders} from '
 			. '{n} folders, {total} total after shares ({ms}ms)', [
 				'user' => $userId,
@@ -386,6 +434,65 @@ class FileArchive {
 	}
 
 	/**
+	 * Fill in what the analyser's filenames do not say: the meeting folder, the
+	 * date, and the order within a day.
+	 *
+	 * One indexed read for all of them at once. It asks the index about files
+	 * the caller already holds a share for, so it widens nothing — a call not
+	 * shared with them was never in $entries to begin with.
+	 *
+	 * @param array<int, array<string, mixed>> $entries
+	 */
+	private function annotateAnalysis(array &$entries): void {
+		$wanted = [];
+		foreach ($entries as $id => $entry) {
+			if (str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)
+				|| str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)) {
+				$wanted[$id] = true;
+			}
+		}
+		if ($wanted === []) {
+			return;
+		}
+		$ids = array_keys($wanted);
+
+		try {
+			$qb = $this->db->getQueryBuilder();
+			$qb->select('fileid', 'parent', 'path')
+				->from('filecache')
+				->where($qb->expr()->in('fileid',
+					$qb->createNamedParameter($ids,
+						\OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)));
+			$result = $qb->executeQuery();
+			$rows = $result->fetchAll();
+			$result->closeCursor();
+		} catch (\Throwable $e) {
+			$this->logger->warning('could not read the index for analysed calls', [
+				'exception' => $e,
+			]);
+			return;
+		}
+
+		foreach ($rows as $row) {
+			$id = (int)$row['fileid'];
+			// Only what was asked for: an older transcript that came back too
+			// must not be marked as analysed, or its name would stop being what
+			// orders it and what a search reads.
+			if (!isset($wanted[$id])) {
+				continue;
+			}
+			$entries[$id]['folder'] = (int)$row['parent'];
+			if (preg_match(self::ANALYSIS_PATH, (string)$row['path'], $m) === 1) {
+				// Sorting is on this string for every format at once, so it is
+				// shaped like the older filenames: date first, then what
+				// separates two calls on the same day.
+				$entries[$id]['sort'] = $m[1] . ' ' . $m[2];
+				$entries[$id]['date'] = strtotime($m[1]) ?: 0;
+			}
+		}
+	}
+
+	/**
 	 * The dated markdown directly under a folder, from the file index.
 	 *
 	 * Read from oc_filecache by parent id: an indexed lookup that returns names
@@ -463,9 +570,11 @@ class FileArchive {
 			fn (array $e) => $this->looksLikeTranscript($e['name']),
 		);
 
-		// Filenames begin with the timestamp, so sorting them reverse is
-		// chronological — newest first, without reading a single file.
-		uasort($transcripts, static fn ($a, $b) => strcmp($b['name'], $a['name']));
+		// The sort key begins with the date — the filename for the older files,
+		// the meeting folder for the analysed ones — so sorting it in reverse is
+		// chronological, newest first, without reading a single file.
+		uasort($transcripts, static fn ($a, $b) => strcmp(
+			(string)($b['sort'] ?? $b['name']), (string)($a['sort'] ?? $a['name'])));
 		return array_values($transcripts);
 	}
 
@@ -474,8 +583,11 @@ class FileArchive {
 	 * checks are on the name alone; the header confirms it later.
 	 */
 	private function looksLikeTranscript(string $name): bool {
-		return preg_match('/^20\d\d-\d\d-\d\d /u', $name) === 1
-			&& !str_contains($name, self::MINUTES_MARKER);
+		// Two shapes: the analyser's fixed filename, and the older
+		// "<timestamp> - <who>.md" the service writes into Транскрипции/.
+		return str_starts_with($name, self::ANALYSIS_TRANSCRIPT)
+			|| (preg_match('/^20\d\d-\d\d-\d\d /u', $name) === 1
+				&& !str_contains($name, self::MINUTES_MARKER));
 	}
 
 	/**
@@ -562,8 +674,10 @@ class FileArchive {
 		$participants = [];
 		$listKey = '';
 		foreach (explode("\n", $block) as $line) {
-			// A list item belongs to whichever key introduced it.
-			if (preg_match('/^\s+-\s+(.+)$/u', $line, $item)) {
+			// A list item belongs to whichever key introduced it. The indent is
+			// optional: the service indents its list items, the analyser does
+			// not, and both headers land here.
+			if (preg_match('/^\s*-\s+(.+)$/u', $line, $item)) {
 				if ($listKey === 'participants') {
 					$participants[] = trim($item[1], " \"\'");
 				}
@@ -583,8 +697,19 @@ class FileArchive {
 			return null;
 		}
 
-		$start = strtotime($scalars['started_at'] ?? $scalars['date'] ?? '') ?: 0;
 		$end = strtotime($scalars['finished_at'] ?? '') ?: 0;
+
+		if (isset($scalars['started_at'])) {
+			$start = strtotime($scalars['started_at']) ?: 0;
+		} elseif ($end > 0 && isset($scalars['duration'])) {
+			// The analyser states when the call ended and how long it ran, but
+			// not when it began. Taking `date` as the start would put it at
+			// midnight and make every call look hours long.
+			$minutes = (int)preg_replace('/\D+/', '', $scalars['duration']);
+			$start = $minutes > 0 ? $end - $minutes * 60 : 0;
+		} else {
+			$start = strtotime($scalars['date'] ?? '') ?: 0;
+		}
 
 		return [
 			'call_start_ts' => $start,
@@ -679,19 +804,27 @@ class FileArchive {
 	}
 
 	/**
-	 * Whether a filename passes the text and date filters.
+	 * Whether a candidate passes the text and date filters.
 	 *
-	 * The filename is "2026-07-20 16-00-00 - Вводная встреча по Superset.md" —
-	 * date, then the participants or the meeting name — so both filters read
-	 * from it. `from`/`to` are day boundaries as unix seconds; either may be 0
-	 * to leave that end open.
+	 * The older filename is "2026-07-20 16-00-00 - Вводная встреча по
+	 * Superset.md" — date, then the participants or the meeting name — so both
+	 * filters read straight from it. The analyser's files say neither: the date
+	 * came from the index, and the meeting name only from the header, which is
+	 * why a text search opens them and a date filter does not.
+	 *
+	 * `from`/`to` are day boundaries as unix seconds; either may be 0 to leave
+	 * that end open.
+	 *
+	 * @param array<string, mixed> $entry
 	 */
-	private function matchesFilter(string $name, string $query, int $from, int $to): bool {
-		if ($query !== '' && mb_stripos($name, $query) === false) {
-			return false;
-		}
+	private function matchesFilter(string $userId, array $entry, string $query,
+		int $from, int $to): bool {
+		$name = (string)$entry['name'];
+
+		// Dates first: cheap for every format, and it narrows what the text
+		// filter below may have to open.
 		if ($from !== 0 || $to !== 0) {
-			$day = strtotime(substr($name, 0, 10)) ?: 0;
+			$day = (int)($entry['date'] ?? (strtotime(substr($name, 0, 10)) ?: 0));
 			if ($from !== 0 && $day < $from) {
 				return false;
 			}
@@ -699,7 +832,32 @@ class FileArchive {
 				return false;
 			}
 		}
-		return true;
+
+		if ($query === '') {
+			return true;
+		}
+		$haystack = isset($entry['folder']) ? $this->searchText($userId, $entry) : $name;
+		return mb_stripos($haystack, $query) !== false;
+	}
+
+	/**
+	 * What a search matches against for an analysed call: the meeting name and
+	 * the participants, from the header.
+	 *
+	 * @param array<string, mixed> $entry
+	 */
+	private function searchText(string $userId, array $entry): string {
+		$file = $this->resolve($userId, $entry);
+		$head = $file === null ? null : $this->head($file);
+		if ($head === null) {
+			return '';
+		}
+		$meta = $this->fromYaml($head);
+		if ($meta === null) {
+			return '';
+		}
+		return (string)($meta['meeting_name'] ?? '')
+			. ' ' . implode(' ', $meta['participants'] ?? []);
 	}
 
 	/**
