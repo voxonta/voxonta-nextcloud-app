@@ -438,11 +438,14 @@ export default {
 	white-space: nowrap;
 }
 
-/* The field's input is 30px tall, the select 36px, so the two never sat level.
-   Pin the field's input to 36px to match. */
-.meeting-list__search :deep(.input-field__input) {
+/* Line the field up with the select. The select is 36px; the field's own frame
+   is 34px, and pinning the input directly only makes it overflow its wrapper
+   (NcTextField sizes the input taller than the frame to leave room for the
+   floating label). So raise the frame itself to 36px and leave the input alone
+   — measured in the live DOM, this is what makes the two frames sit level. */
+.meeting-list__search,
+.meeting-list__search :deep(.input-field__main-wrapper) {
 	height: 36px;
-	min-height: 36px;
 }
 
 .meeting-list {
