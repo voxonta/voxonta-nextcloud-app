@@ -162,18 +162,31 @@ class FileArchive {
 
 		$meetings = [];
 		$scanned = 0;
+		$day = '';
 		foreach (array_slice($candidates, $offset) as $entry) {
+			// A page runs to the end of a day even if that overshoots the limit.
+			// Which call came first is only known from its header, and a day cut
+			// between two pages could not be put back in order — nor could the
+			// list say "Today" once for it.
+			if (count($meetings) >= $limit && $this->day($entry) !== $day) {
+				break;
+			}
 			$scanned++;
 			$file = $this->resolve($userId, $entry);
 			$meta = $file === null ? null
 				: $this->transcriptMetadata($file, isset($entry['summary_only']));
 			if ($meta !== null) {
 				$meetings[] = $meta;
-				if (count($meetings) >= $limit) {
-					break;
-				}
+				$day = $this->day($entry);
 			}
 		}
+
+		// Now that the headers have been read, the calls can be put in the order
+		// they were held. The analyser numbers its folders as it processes them,
+		// which is close to chronological but not it: a long call ends after a
+		// short one that started later.
+		usort($meetings, static fn (array $a, array $b) =>
+			$b['call_start_ts'] <=> $a['call_start_ts']);
 
 		$this->logger->debug('archive listing for {user}: {total} candidates, '
 			. '{scanned} scanned from {offset}, {kept} shown, headers {ms}ms', [
@@ -374,6 +387,16 @@ class FileArchive {
 			]);
 
 		return $this->cache[$userId] = $entries;
+	}
+
+	/**
+	 * The day a candidate belongs to, "YYYY-MM-DD": from the analyser's path,
+	 * or from the filename of a loose transcript.
+	 *
+	 * @param array<string, mixed> $entry
+	 */
+	private function day(array $entry): string {
+		return substr((string)($entry['sort'] ?? $entry['name']), 0, 10);
 	}
 
 	/**

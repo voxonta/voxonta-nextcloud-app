@@ -681,4 +681,44 @@ class FileArchiveTest extends TestCase {
 
 		$this->assertCount(2, $archive->list('alice')['meetings']);
 	}
+
+	public function testCallsAreListedInTheOrderTheyWereHeld(): void {
+		// The analyser numbers folders as it processes them: 004 here is the
+		// call that started later, and only the headers say so.
+		$early = str_replace('finished_at: 2026-07-20 06:50:33+00:00',
+			'finished_at: 2026-07-20 06:20:00+00:00', self::ANALYSIS);
+		$late = str_replace(
+			['finished_at: 2026-07-20 06:50:33+00:00', 'duration: 19 min'],
+			['finished_at: 2026-07-20 07:10:00+00:00', 'duration: 5 min'],
+			self::ANALYSIS);
+
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => $early,
+			'10_Original_Transcript (2).md' => $late,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '005'),
+			'10_Original_Transcript (2).md' => $this->meetingFolder(9, '2026-07-20', '004'),
+		], analysisFolder: true);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(2, $meetings);
+		$this->assertGreaterThan($meetings[1]['call_start_ts'],
+			$meetings[0]['call_start_ts'],
+			'the folder number is not the order calls were held');
+	}
+
+	public function testAPageRunsToTheEndOfItsDay(): void {
+		// Three calls on one day, asked for two: the third comes along, because
+		// a day split across pages could not be ordered or headed.
+		$files = $index = [];
+		foreach ([1, 2, 3] as $i) {
+			$name = $i === 1 ? '10_Original_Transcript.md' : "10_Original_Transcript ($i).md";
+			$files[$name] = self::ANALYSIS;
+			$index[$name] = $this->meetingFolder(6 + $i, '2026-07-20', "00$i");
+		}
+		$archive = $this->archive($files, index: $index, analysisFolder: true);
+
+		$this->assertCount(3, $archive->list('alice', 2, 0)['meetings']);
+	}
 }
