@@ -450,8 +450,10 @@ export default {
 	margin: 0;
 }
 
+/* The search takes the first row alone: at sidebar width it and a select
+   cannot both be usable, and the query is the field people reach for. */
 .meeting-list__search {
-	flex: 1 1 auto;
+	flex: 1 0 100%;
 	min-width: 0;
 }
 
@@ -464,9 +466,11 @@ export default {
    are all on the same element. Its own rule is two classes (.v-select.select),
    which a single class cannot beat — reach it from the parent with :deep so the
    selector is two classes too, and it is the element itself, not a descendant. */
+/* Two rows in a sidebar this narrow: the search on its own, then the two
+   selects sharing the row below — the conversation names need the wider half. */
 .meeting-list__filters :deep(.v-select.select) {
-	flex: 0 0 auto;
-	width: 200px;
+	flex: 1 1 0;
+	width: auto;
 	min-width: 0;
 	margin: 0;
 }
@@ -484,8 +488,7 @@ export default {
    outrank the shared `.v-select.select` width above — same element, not a
    descendant of it. */
 .meeting-list__filters :deep(.v-select.select.meeting-list__room) {
-	width: 100%;
-	flex: 1 0 100%;
+	flex: 2 1 0;
 }
 
 .meeting-list__room :deep(.vs__selected) {
