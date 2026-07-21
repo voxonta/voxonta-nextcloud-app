@@ -418,17 +418,27 @@ export default {
 	margin: 0;
 }
 
-/* NcSelect sets min-width: 260px on its inner toggle, which is why a width on
-   the wrapper did nothing — the min-width has to be cleared where it is set. */
+/* NcSelect sets a min-width deep inside (260px), and it is not obvious on which
+   vue-select element, so clear it on all of them — the wrapper's own width then
+   takes effect. */
 .meeting-list__period {
 	flex: 0 0 auto;
 	width: 150px;
 }
 
 .meeting-list__period :deep(.v-select),
-.meeting-list__period :deep(.vs__dropdown-toggle) {
+.meeting-list__period :deep(.vs__dropdown-toggle),
+.meeting-list__period :deep(.vs__selected-options),
+.meeting-list__period :deep(.vs__search) {
 	min-width: 0;
-	width: 150px;
+}
+
+/* The field renders at 30px and the select at 36px, so they never lined up.
+   Pin both to the same height. */
+.meeting-list__search :deep(input),
+.meeting-list__period :deep(.vs__dropdown-toggle) {
+	height: 36px;
+	min-height: 36px;
 }
 
 .meeting-list {
