@@ -119,7 +119,14 @@
 </template>
 
 <script>
+import {
+	davGetClient,
+	davGetDefaultPropfind,
+	davResultToNode,
+	davRootPath,
+} from '@nextcloud/files'
 import { translate as t } from '@nextcloud/l10n'
+import { generateUrl } from '@nextcloud/router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
 import NcButton from '@nextcloud/vue/components/NcButton'
@@ -268,29 +275,59 @@ export default {
 		/**
 		 * Open Nextcloud's own sharing panel on one of the meeting's files.
 		 *
+		 * The panel is Files' own, so permissions here are the same permissions
+		 * as everywhere else in the instance. In Nextcloud 33 it is a Pinia
+		 * store reached through OCA.Files._sidebar() and it takes a Node, not a
+		 * path — hence the DAV lookup. That entry point is private, so a
+		 * failure falls back to opening the file in Files, where the same panel
+		 * lives behind a stable URL.
+		 *
 		 * @param {string} which 'summary' or 'transcript'
 		 */
 		async share(which) {
-			const sidebar = window.OCA?.Files?.Sidebar
-			if (!sidebar) {
+			let paths
+			try {
+				paths = await fetchPaths(this.meeting.session_id)
+			} catch (e) {
+				console.error('failed to locate the meeting files', e)
+				this.warn(t('done_transcription', 'Could not open sharing.'))
+				return
+			}
+
+			const path = paths[which]
+			if (!path) {
+				this.warn(t('done_transcription', 'This meeting has no such file.'))
+				return
+			}
+
+			try {
+				const client = davGetClient()
+				const result = await client.stat(davRootPath + path, {
+					details: true,
+					data: davGetDefaultPropfind(),
+				})
+				const node = davResultToNode(result.data)
+				const sidebar = window.OCA?.Files?._sidebar?.()
+				if (!sidebar?.open) {
+					throw new Error('no sidebar')
+				}
+				// The tab is set first: setting it afterwards races the panel's
+				// own load and lands on the details tab.
+				sidebar.setActiveTab('sharing')
+				sidebar.open(node)
+			} catch (e) {
+				console.error('failed to open the sharing panel', e)
+				this.openInFiles(paths[which + '_id'])
+			}
+		},
+
+		/** Last resort: the same panel, in Files. */
+		openInFiles(fileId) {
+			if (!fileId) {
 				this.warn(t('done_transcription', 'Sharing is unavailable here.'))
 				return
 			}
-			try {
-				const paths = await fetchPaths(this.meeting.session_id)
-				const path = paths[which]
-				if (!path) {
-					this.warn(t('done_transcription', 'This meeting has no such file.'))
-					return
-				}
-				// The tab is set before opening: setting it after races the
-				// panel's own load and lands on the details tab.
-				sidebar.setActiveTab('sharing')
-				await sidebar.open(path)
-			} catch (e) {
-				console.error('failed to open the sharing panel', e)
-				this.warn(t('done_transcription', 'Could not open sharing.'))
-			}
+			window.open(generateUrl('/f/{fileId}', { fileId }), '_blank', 'noopener')
 		},
 
 		async loadSummary() {

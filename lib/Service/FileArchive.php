@@ -613,9 +613,13 @@ class FileArchive {
 		$transcript = isset($entry['summary_only']) ? null : $this->resolve($userId, $entry);
 		$summary = $this->summaryFile($userId, $entry);
 
+		// The ids come along for the fallback: opening the file in Files needs
+		// an id, not a path.
 		return [
 			'transcript' => $transcript === null ? '' : $this->userPath($userId, $transcript),
+			'transcript_id' => $transcript === null ? 0 : $transcript->getId(),
 			'summary' => $summary === null ? '' : $this->userPath($userId, $summary),
+			'summary_id' => $summary === null ? 0 : $summary->getId(),
 		];
 	}
 
