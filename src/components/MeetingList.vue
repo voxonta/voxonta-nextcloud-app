@@ -418,27 +418,30 @@ export default {
 	margin: 0;
 }
 
-.meeting-list__period {
+/* NcSelect's root element carries .v-select.select AND our .meeting-list__period
+   all at once, so the width and the min-width: 260px and the margin-bottom: 4px
+   are all on the same element. Its own rule is two classes (.v-select.select),
+   which a single class cannot beat — reach it from the parent with :deep so the
+   selector is two classes too, and it is the element itself, not a descendant. */
+.meeting-list__filters :deep(.v-select.select) {
 	flex: 0 0 auto;
-	width: 150px;
-}
-
-/* NcSelect's own rule is `.v-select.select { min-width: 260px }` — two classes,
-   which a single-class override does not beat. Match its specificity to let the
-   wrapper width win. */
-.meeting-list__period :deep(.v-select.select) {
+	width: 200px;
 	min-width: 0;
-	width: 150px;
+	margin: 0;
 }
 
-/* The field's input is 30px tall, the select toggle 36px, so the two never sat
-   level. Pin both to 36px. */
+/* vue-select gives the chosen value `flex: 0 1 auto`, so it shrinks and clips
+   the label ("За всё время" came out "За … время") even though the full text is
+   in the DOM. Stop it shrinking; the 200px width holds the longest label. */
+.meeting-list__period :deep(.vs__selected) {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+/* The field's input is 30px tall, the select 36px, so the two never sat level.
+   Pin the field's input to 36px to match. */
 .meeting-list__search :deep(.input-field__input) {
 	height: 36px;
-	min-height: 36px;
-}
-
-.meeting-list__period :deep(.v-select.select) {
 	min-height: 36px;
 }
 
