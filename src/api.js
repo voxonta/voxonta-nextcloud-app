@@ -36,10 +36,11 @@ async function request(path, { signal } = {}) {
  * @param {string} [options.query] text to match against participants and title
  * @param {number} [options.from] earliest day, unix seconds (0 = open)
  * @param {number} [options.to] latest day, unix seconds (0 = open)
+ * @param {string} [options.room] conversation name to restrict to
  * @param {AbortSignal} [options.signal] to cancel a superseded request
  * @return {Promise<{meetings: object[], nextOffset: number, hasMore: boolean}>}
  */
-export async function fetchMeetings({ limit = 50, offset = 0, query = '', from = 0, to = 0, signal } = {}) {
+export async function fetchMeetings({ limit = 50, offset = 0, query = '', from = 0, to = 0, room = '', signal } = {}) {
 	const params = new URLSearchParams({ limit, offset })
 	// Sent only when set, to keep the common unfiltered request tidy.
 	if (query) {
@@ -51,6 +52,9 @@ export async function fetchMeetings({ limit = 50, offset = 0, query = '', from =
 	if (to) {
 		params.set('to', to)
 	}
+	if (room) {
+		params.set('room', room)
+	}
 	const data = await request(`/meetings?${params}`, { signal })
 	return {
 		meetings: data.meetings || [],
@@ -60,6 +64,32 @@ export async function fetchMeetings({ limit = 50, offset = 0, query = '', from =
 		nextOffset: data.next_offset || 0,
 		hasMore: !!data.has_more,
 	}
+}
+
+/**
+ * The group conversations to offer as a filter, most-used first.
+ *
+ * One-to-ones are left out by the server: they are most of the names and none
+ * of the use — those are found by searching for the person.
+ *
+ * @return {Promise<{name: string, count: number}[]>}
+ */
+export async function fetchRooms() {
+	const data = await request('/rooms')
+	return data.rooms || []
+}
+
+/**
+ * Where the meeting's two files sit in the user's own tree.
+ *
+ * Only for opening Nextcloud's sharing panel on them — the panel, not this app,
+ * is what grants anything.
+ *
+ * @param {string} sessionId meeting id
+ * @return {Promise<{transcript: string, summary: string}>}
+ */
+export async function fetchPaths(sessionId) {
+	return request(`/meetings/${encodeURIComponent(sessionId)}/paths`)
 }
 
 /**

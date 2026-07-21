@@ -40,7 +40,8 @@ class ArchiveController extends Controller {
 	#[NoAdminRequired]
 	#[NoCSRFRequired]
 	public function meetings(int $limit = 50, int $offset = 0,
-		string $query = '', int $from = 0, int $to = 0): JSONResponse {
+		string $query = '', int $from = 0, int $to = 0,
+		string $room = ''): JSONResponse {
 		if (!$this->identified()) {
 			return $this->unauthorised();
 		}
@@ -52,8 +53,38 @@ class ArchiveController extends Controller {
 			trim($query),
 			max(0, $from),
 			max(0, $to),
+			trim($room),
 		);
 		return new JSONResponse($page);
+	}
+
+	/**
+	 * The conversations to offer as a filter.
+	 */
+	#[NoAdminRequired]
+	#[NoCSRFRequired]
+	public function rooms(): JSONResponse {
+		if (!$this->identified()) {
+			return $this->unauthorised();
+		}
+		return new JSONResponse(['rooms' => $this->archive->rooms($this->userId)]);
+	}
+
+	/**
+	 * Where the meeting's files live, so the page can open Nextcloud's own
+	 * sharing panel on them. Paths only — no permission is granted here.
+	 */
+	#[NoAdminRequired]
+	#[NoCSRFRequired]
+	public function paths(string $sessionId): JSONResponse {
+		if (!$this->identified()) {
+			return $this->unauthorised();
+		}
+		try {
+			return new JSONResponse($this->archive->paths($this->userId, $sessionId));
+		} catch (BackendException $e) {
+			return new JSONResponse(['message' => $e->getMessage()], $e->getStatus());
+		}
 	}
 
 	/**

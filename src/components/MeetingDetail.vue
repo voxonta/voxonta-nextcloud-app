@@ -20,6 +20,44 @@
 				<template v-if="formattedDuration"> · {{ formattedDuration }}</template>
 				<template v-if="participants"> · {{ participants }}</template>
 			</p>
+
+			<!--
+				Taking a meeting out of here and giving someone access to it are
+				the two things people want besides reading. Access is Nextcloud's
+				own panel — the same one as in Files — because permissions on
+				these files are ordinary Nextcloud permissions, and a second
+				dialog of our own would only be a worse copy that drifts.
+			-->
+			<div class="meeting-detail__actions">
+				<NcActions :inline="2">
+					<NcActionButton :disabled="!summary" @click="download('summary')">
+						<template #icon>
+							<DownloadIcon :size="20" />
+						</template>
+						{{ t('done_transcription', 'Download summary') }}
+					</NcActionButton>
+					<NcActionButton
+						v-if="meeting.has_transcript !== false"
+						@click="download('transcript')">
+						<template #icon>
+							<DownloadIcon :size="20" />
+						</template>
+						{{ t('done_transcription', 'Download transcript') }}
+					</NcActionButton>
+					<NcActionButton v-if="meeting.has_transcript !== false" @click="share('transcript')">
+						<template #icon>
+							<ShareIcon :size="20" />
+						</template>
+						{{ t('done_transcription', 'Access to the transcript') }}
+					</NcActionButton>
+					<NcActionButton @click="share('summary')">
+						<template #icon>
+							<ShareIcon :size="20" />
+						</template>
+						{{ t('done_transcription', 'Access to the summary') }}
+					</NcActionButton>
+				</NcActions>
+			</div>
 		</header>
 
 		<NcLoadingIcon v-if="loadingSummary" :size="24" class="meeting-detail__loading" />
@@ -82,25 +120,33 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import NcActionButton from '@nextcloud/vue/components/NcActionButton'
+import NcActions from '@nextcloud/vue/components/NcActions'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcRichText from '@nextcloud/vue/components/NcRichText'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
+import DownloadIcon from 'vue-material-design-icons/Download.vue'
+import ShareIcon from 'vue-material-design-icons/ShareVariant.vue'
 import MicrophoneOffIcon from 'vue-material-design-icons/MicrophoneOff.vue'
 import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
-import { fetchSummary, fetchTranscript } from '../api.js'
+import { fetchPaths, fetchSummary, fetchTranscript } from '../api.js'
 
 export default {
 	name: 'MeetingDetail',
 
 	components: {
+		NcActionButton,
+		NcActions,
 		NcButton,
 		NcEmptyContent,
 		NcLoadingIcon,
 		NcRichText,
 		AlertIcon,
+		DownloadIcon,
 		MicrophoneOffIcon,
+		ShareIcon,
 		TextIcon,
 	},
 
@@ -168,6 +214,85 @@ export default {
 	methods: {
 		t,
 
+		// Nextcloud's own toast, reached through the global rather than
+		// @nextcloud/dialogs: the app does not otherwise need that dependency,
+		// and a failure to warn must not itself throw.
+		warn(message) {
+			if (window.OCP?.Toast?.error) {
+				window.OCP.Toast.error(message)
+			} else {
+				console.warn(message)
+			}
+		},
+
+		/**
+		 * Save what is already on screen as a .md file.
+		 *
+		 * From memory rather than a second request: the text is here, and this
+		 * way the download works on exactly what was read.
+		 *
+		 * @param {string} what 'summary' or 'transcript'
+		 */
+		async download(what) {
+			let text = what === 'summary' ? this.summary : this.transcript
+			// The transcript is only fetched when opened, so a download from a
+			// meeting still showing its summary has to fetch it first.
+			if (what === 'transcript' && !text) {
+				try {
+					text = await fetchTranscript(this.meeting.session_id)
+				} catch (e) {
+					console.error('failed to load transcript', e)
+					this.warn(t('done_transcription', 'Could not load the transcript.'))
+					return
+				}
+			}
+			if (!text) {
+				return
+			}
+
+			const title = this.meeting.room_name || t('done_transcription', 'Untitled call')
+			const label = what === 'summary'
+				? t('done_transcription', 'summary')
+				: t('done_transcription', 'transcript')
+			// Slashes and colons are not filename characters on every system.
+			const name = `${title} — ${label}.md`.replace(/[\\/:*?"<>|]/g, '-')
+
+			const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }))
+			const link = document.createElement('a')
+			link.href = url
+			link.download = name
+			link.click()
+			URL.revokeObjectURL(url)
+		},
+
+		/**
+		 * Open Nextcloud's own sharing panel on one of the meeting's files.
+		 *
+		 * @param {string} which 'summary' or 'transcript'
+		 */
+		async share(which) {
+			const sidebar = window.OCA?.Files?.Sidebar
+			if (!sidebar) {
+				this.warn(t('done_transcription', 'Sharing is unavailable here.'))
+				return
+			}
+			try {
+				const paths = await fetchPaths(this.meeting.session_id)
+				const path = paths[which]
+				if (!path) {
+					this.warn(t('done_transcription', 'This meeting has no such file.'))
+					return
+				}
+				// The tab is set before opening: setting it after races the
+				// panel's own load and lands on the details tab.
+				sidebar.setActiveTab('sharing')
+				await sidebar.open(path)
+			} catch (e) {
+				console.error('failed to open the sharing panel', e)
+				this.warn(t('done_transcription', 'Could not open sharing.'))
+			}
+		},
+
 		async loadSummary() {
 			this.loadingSummary = true
 			const sessionId = this.meeting.session_id
@@ -226,13 +351,23 @@ export default {
 }
 
 .meeting-detail__header {
+	position: relative;
 	border-bottom: 1px solid var(--color-border);
 	padding-bottom: 12px;
 	margin-bottom: 20px;
+	/* Room for the actions pinned to the top right, so a long meeting name
+	   wraps before it reaches them. */
+	padding-inline-end: 100px;
 }
 
 .meeting-detail__header h2 {
 	margin: 0 0 4px;
+}
+
+.meeting-detail__actions {
+	position: absolute;
+	inset-inline-end: 0;
+	top: 0;
 }
 
 .meeting-detail__meta {

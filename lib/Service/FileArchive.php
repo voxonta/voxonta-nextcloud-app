@@ -163,16 +163,16 @@ class FileArchive {
 	 *               next_offset: int, has_more: bool}
 	 */
 	public function list(string $userId, int $limit = 50, int $offset = 0,
-		string $query = '', int $from = 0, int $to = 0): array {
+		string $query = '', int $from = 0, int $to = 0, string $room = ''): array {
 		$candidates = $this->transcriptCandidates($userId);
 
 		// Filtering is on the filename, which carries the participants and the
 		// meeting name as well as the date — so a search for a person or a
 		// subject, and a date range, both work without opening a single file.
-		if ($query !== '' || $from !== 0 || $to !== 0) {
+		if ($query !== '' || $from !== 0 || $to !== 0 || $room !== '') {
 			$candidates = array_values(array_filter(
 				$candidates,
-				fn (array $e) => $this->matchesFilter($userId, $e, $query, $from, $to),
+				fn (array $e) => $this->matchesFilter($userId, $e, $query, $from, $to, $room),
 			));
 		}
 		$tHeaders = microtime(true);
@@ -226,13 +226,27 @@ class FileArchive {
 	 * @throws BackendException
 	 */
 	public function summary(string $userId, string $sessionId): string {
+		$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
+		if ($entry === null) {
+			throw new BackendException('not found', Http::STATUS_NOT_FOUND);
+		}
+		$file = $this->summaryFile($userId, $entry);
+
+		// A call transcribed but not analysed is a normal state, not an error.
+		return $file === null ? '' : $this->contents($file);
+	}
+
+	/**
+	 * The file holding a meeting's summary, whichever shape the archive takes.
+	 *
+	 * @param array<string, mixed> $entry
+	 */
+	private function summaryFile(string $userId, array $entry): ?File {
 		$candidates = $this->candidates($userId);
-		$entry = $candidates[(int)$sessionId] ?? null;
 
 		// A call whose transcript was never shared: the summary is the call.
-		if ($entry !== null && str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)) {
-			$file = $this->resolve($userId, $entry);
-			return $file === null ? '' : $this->contents($file);
+		if (str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)) {
+			return $this->resolve($userId, $entry);
 		}
 
 		// Analyser output: the summary is the file that sits in the same meeting
@@ -240,42 +254,36 @@ class FileArchive {
 		// name — a recipient's copies are all flat in Talk/ with the meeting
 		// nowhere in the name, so pairing on names would attach a stranger's
 		// summary to this call.
-		if ($entry !== null && str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)) {
+		if (str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)) {
 			$folder = $entry['folder'] ?? 0;
 			foreach ($folder === 0 ? [] : $candidates as $other) {
 				if (($other['folder'] ?? 0) === $folder
 					&& str_starts_with($other['name'], self::ANALYSIS_SUMMARY)) {
-					$file = $this->resolve($userId, $other);
-					return $file === null ? '' : $this->contents($file);
+					return $this->resolve($userId, $other);
 				}
 			}
 			// A transcript with no summary shared beside it. Not an error.
-			return '';
+			return null;
 		}
-
-		$transcript = $this->fileFor($userId, $sessionId);
 
 		// Older calls: minutes are a separate file whose name starts with the
 		// same timestamp as the transcript.
-		$prefix = $this->timestampPrefix($transcript->getName());
+		$prefix = $this->timestampPrefix((string)$entry['name']);
 		if ($prefix === '') {
-			return '';
+			return null;
 		}
-
-		foreach ($this->candidates($userId) as $id => $entry) {
-			if ($id === (int)$sessionId
-				|| !str_contains($entry['name'], self::MINUTES_MARKER)
-				|| $this->timestampPrefix($entry['name']) !== $prefix) {
+		foreach ($candidates as $id => $other) {
+			if ($id === (int)$entry['id']
+				|| !str_contains($other['name'], self::MINUTES_MARKER)
+				|| $this->timestampPrefix($other['name']) !== $prefix) {
 				continue;
 			}
-			$file = $this->resolve($userId, $entry);
+			$file = $this->resolve($userId, $other);
 			if ($file !== null) {
-				return $this->contents($file);
+				return $file;
 			}
 		}
-
-		// A call transcribed but not analysed is a normal state, not an error.
-		return '';
+		return null;
 	}
 
 	/**
@@ -550,6 +558,72 @@ class FileArchive {
 			}
 		}
 		return $warmed;
+	}
+
+	/**
+	 * The group conversations this person has calls from, most-used first.
+	 *
+	 * One-to-ones are left out: they are the bulk of the names and none of the
+	 * use — nobody picks their own 1:1 from a list of hundreds, they search for
+	 * the person. A conversation counts as a group if any of its calls had more
+	 * than two people in it, which is what the headers say; the names alone do
+	 * not tell them apart ("Дарья Костусенко, Дмитрий Чиненов" is a 1:1).
+	 *
+	 * @return array<int, array{name: string, count: int}>
+	 */
+	public function rooms(string $userId): array {
+		$rooms = [];
+		foreach ($this->transcriptCandidates($userId) as $entry) {
+			$meta = $this->metadataFor($userId, $entry);
+			$name = (string)($meta['room_name'] ?? '');
+			if ($name === '') {
+				continue;
+			}
+			$people = count($meta['participants'] ?? []);
+			$rooms[$name] ??= ['name' => $name, 'count' => 0, 'people' => 0];
+			$rooms[$name]['count']++;
+			$rooms[$name]['people'] = max($rooms[$name]['people'], $people);
+		}
+
+		$groups = array_values(array_filter($rooms,
+			static fn (array $r) => $r['people'] > 2));
+		usort($groups, static fn (array $a, array $b) => $b['count'] <=> $a['count']);
+
+		return array_map(
+			static fn (array $r) => ['name' => $r['name'], 'count' => $r['count']],
+			$groups);
+	}
+
+	/**
+	 * Where a meeting's two files sit in this person's own tree, for Nextcloud's
+	 * sharing panel to open on.
+	 *
+	 * Paths, not ids: the panel takes the path as the user sees it, which for a
+	 * recipient is wherever they mounted the share.
+	 *
+	 * @return array{transcript: string, summary: string}
+	 * @throws BackendException
+	 */
+	public function paths(string $userId, string $sessionId): array {
+		$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
+		if ($entry === null) {
+			throw new BackendException('not found', Http::STATUS_NOT_FOUND);
+		}
+
+		$transcript = isset($entry['summary_only']) ? null : $this->resolve($userId, $entry);
+		$summary = $this->summaryFile($userId, $entry);
+
+		return [
+			'transcript' => $transcript === null ? '' : $this->userPath($userId, $transcript),
+			'summary' => $summary === null ? '' : $this->userPath($userId, $summary),
+		];
+	}
+
+	/** A node's path as the user sees it: "/Talk/…", not "/alice/files/Talk/…". */
+	private function userPath(string $userId, File $file): string {
+		$prefix = '/' . $userId . '/files';
+		$path = $file->getPath();
+		return str_starts_with($path, $prefix) ? substr($path, strlen($prefix)) : $path;
 	}
 
 	/**
@@ -1222,7 +1296,7 @@ class FileArchive {
 	 * @param array<string, mixed> $entry
 	 */
 	private function matchesFilter(string $userId, array $entry, string $query,
-		int $from, int $to): bool {
+		int $from, int $to, string $room = ''): bool {
 		$name = (string)$entry['name'];
 
 		// Dates first: cheap for every format, and it narrows what the text
@@ -1233,6 +1307,13 @@ class FileArchive {
 				return false;
 			}
 			if ($to !== 0 && $day > $to) {
+				return false;
+			}
+		}
+
+		if ($room !== '') {
+			$meta = $this->metadataFor($userId, $entry);
+			if (($meta['room_name'] ?? '') !== $room) {
 				return false;
 			}
 		}

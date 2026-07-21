@@ -217,6 +217,7 @@ class FileArchiveTest extends TestCase {
 	private function file(string $name, string $content): File {
 		$file = $this->createMock(File::class);
 		$file->method('getName')->willReturn($name);
+		$file->method('getPath')->willReturn('/alice/files/Talk/' . $name);
 		$file->method('getId')->willReturn($this->nextId++);
 		$file->method('getContent')->willReturn($content);
 		$file->method('fopen')->willReturnCallback(
@@ -761,5 +762,86 @@ class FileArchiveTest extends TestCase {
 		$this->assertStringNotContainsString('meeting_date:', $summary);
 		$this->assertStringStartsWith('[00:05]', $transcript);
 		$this->assertStringNotContainsString('source_file:', $transcript);
+	}
+
+	// ── conversations as a filter ──────────────────────────────────────────
+	public function testOnlyGroupConversationsAreOffered(): void {
+		// Two people is a one-to-one however it is named — and most of the
+		// archive is those, which is exactly what makes the list unusable.
+		$group = str_replace("participants:\n  - Анатолий Хватиков\n  - Евгений Кутявин",
+			"participants:\n  - Анатолий Хватиков\n  - Евгений Кутявин\n  - Дарья Костусенко",
+			self::YAML);
+		$archive = $this->archive([
+			'2026-07-20 10-00-00 - Планёрка.md' => $group,
+			'2026-07-19 10-00-00 - Тет-а-тет.md' => self::YAML,
+		]);
+
+		$rooms = $archive->rooms('alice');
+
+		$this->assertSame(['Вводная встреча по Superset'],
+			array_column($rooms, 'name'));
+	}
+
+	public function testConversationsComeMostUsedFirst(): void {
+		$three = "participants:\n  - A\n  - B\n  - C";
+		$one = str_replace("participants:\n  - Анатолий Хватиков\n  - Евгений Кутявин",
+			$three, str_replace('Вводная встреча по Superset', 'Дейли', self::YAML));
+		$two = str_replace("participants:\n  - Анатолий Хватиков\n  - Евгений Кутявин",
+			$three, str_replace('Вводная встреча по Superset', 'Ретро', self::YAML));
+		$archive = $this->archive([
+			'2026-07-20 10-00-00 - a.md' => $one,
+			'2026-07-19 10-00-00 - b.md' => $one,
+			'2026-07-18 10-00-00 - c.md' => $two,
+		]);
+
+		$rooms = $archive->rooms('alice');
+
+		$this->assertSame(['Дейли', 'Ретро'], array_column($rooms, 'name'));
+		$this->assertSame([2, 1], array_column($rooms, 'count'));
+	}
+
+	public function testFilteringByConversationKeepsOnlyItsCalls(): void {
+		$three = "participants:\n  - A\n  - B\n  - C";
+		$daily = str_replace("participants:\n  - Анатолий Хватиков\n  - Евгений Кутявин",
+			$three, str_replace('Вводная встреча по Superset', 'Дейли', self::YAML));
+		$archive = $this->archive([
+			'2026-07-20 10-00-00 - a.md' => $daily,
+			'2026-07-19 10-00-00 - b.md' => self::YAML,
+		]);
+
+		$meetings = $archive->list('alice', 50, 0, '', 0, 0, 'Дейли')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('Дейли', $meetings[0]['room_name']);
+	}
+
+	// ── paths for the sharing panel ────────────────────────────────────────
+	public function testTheSharingPanelGetsBothFilesOwnPaths(): void {
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary.md' => self::SUMMARY,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		], analysisFolder: true);
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
+
+		$paths = $archive->paths('alice', $id);
+
+		// As the user sees them — the "/alice/files" prefix is not a path
+		// Nextcloud's panel would accept.
+		$this->assertSame('/Talk/10_Original_Transcript.md', $paths['transcript']);
+		$this->assertSame('/Talk/01_Executive_Summary.md', $paths['summary']);
+	}
+
+	public function testAskingForTheFilesOfAnUnknownCallIsRefused(): void {
+		$archive = $this->archive($this->transcriptFile());
+
+		try {
+			$archive->paths('alice', '999999');
+			$this->fail('expected a refusal');
+		} catch (BackendException $e) {
+			$this->assertSame(Http::STATUS_NOT_FOUND, $e->getStatus());
+		}
 	}
 }

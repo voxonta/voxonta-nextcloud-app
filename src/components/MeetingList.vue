@@ -33,6 +33,26 @@
 				label="label"
 				:aria-label-combobox="t('done_transcription', 'Period')"
 				@update:model-value="onFilterChange" />
+
+			<!--
+				Conversations, most-used first, with the count beside each: the
+				list runs to a couple of hundred, so it is searchable and the
+				common ones are at the top. Clearable, because "any conversation"
+				is the normal state.
+			-->
+			<NcSelect
+				v-model="room"
+				class="meeting-list__room"
+				:options="rooms"
+				label="name"
+				:placeholder="t('done_transcription', 'Any conversation')"
+				:aria-label-combobox="t('done_transcription', 'Conversation')"
+				@update:model-value="onFilterChange">
+				<template #option="{ name, count }">
+					<span class="meeting-list__room-name">{{ name }}</span>
+					<span class="meeting-list__room-count">{{ count }}</span>
+				</template>
+			</NcSelect>
 		</div>
 
 		<div ref="scroll" class="meeting-list" @scroll.passive="onScroll">
@@ -122,7 +142,7 @@ import NcTextField from '@nextcloud/vue/components/NcTextField'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
 import MagnifyIcon from 'vue-material-design-icons/Magnify.vue'
 import MicrophoneIcon from 'vue-material-design-icons/Microphone.vue'
-import { fetchMeetings } from '../api.js'
+import { fetchMeetings, fetchRooms } from '../api.js'
 
 const PAGE = 50
 
@@ -167,6 +187,8 @@ export default {
 			// Filters.
 			query: '',
 			period: null,
+			room: null,
+			rooms: [],
 			debounce: null,
 		}
 	},
@@ -238,15 +260,26 @@ export default {
 
 	mounted() {
 		this.load()
+		this.loadRooms()
 	},
 
 	methods: {
 		t,
 
+		// The conversation list is a filter, not content: if it cannot be had,
+		// the archive still works without it.
+		async loadRooms() {
+			try {
+				this.rooms = await fetchRooms()
+			} catch (e) {
+				console.error('failed to load conversations', e)
+			}
+		},
+
 		// The active filters as request parameters. A period is turned into a
 		// "from" second; "to" is left open so today is always included.
 		filterParams() {
-			const params = { query: this.query.trim() }
+			const params = { query: this.query.trim(), room: this.room?.name || '' }
 			const days = { today: 1, week: 7, month: 30, year: 365 }[this.period?.id]
 			if (days) {
 				const start = new Date()
@@ -403,6 +436,7 @@ export default {
 
 .meeting-list__filters {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 8px;
 	padding: 6px 8px;
@@ -443,6 +477,37 @@ export default {
 .meeting-list__period :deep(.vs__selected) {
 	flex-shrink: 0;
 	white-space: nowrap;
+}
+
+/* The conversation names are long and the list is a sidebar, so this one takes
+   a row of its own rather than squeezing the two above it. Three classes to
+   outrank the shared `.v-select.select` width above — same element, not a
+   descendant of it. */
+.meeting-list__filters :deep(.v-select.select.meeting-list__room) {
+	width: 100%;
+	flex: 1 0 100%;
+}
+
+.meeting-list__room :deep(.vs__selected) {
+	max-width: calc(100% - 40px);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* The count sits right, dimmed: it says which conversations are worth picking
+   without competing with the name. */
+.meeting-list__room-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.meeting-list__room-count {
+	margin-inline-start: auto;
+	padding-inline-start: 8px;
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
 }
 
 /* Line the field up with the select. The select is 36px; the field's own frame
