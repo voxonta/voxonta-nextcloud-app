@@ -450,6 +450,27 @@ class FileArchive {
 	}
 
 	/**
+	 * A document without its YAML header.
+	 *
+	 * The header is how the app reads a file; to a person it is noise printed
+	 * above their meeting — "meeting_file_stem: 2026-07-21_ukhod-…".
+	 */
+	private function body(string $text): string {
+		$text = ltrim($text);
+		if (!str_starts_with($text, '---')) {
+			return $text;
+		}
+		$end = strpos($text, "\n---", 3);
+		if ($end === false) {
+			return $text;
+		}
+		// Past the closing marker and its newline.
+		$rest = substr($text, $end + 4);
+		$nl = strpos($rest, "\n");
+		return ltrim($nl === false ? '' : substr($rest, $nl + 1));
+	}
+
+	/**
 	 * The day a candidate belongs to, "YYYY-MM-DD": from the analyser's path,
 	 * or from the filename of a loose transcript.
 	 *
@@ -1055,7 +1076,7 @@ class FileArchive {
 	 */
 	private function contents(File $file): string {
 		try {
-			return (string)$file->getContent();
+			return $this->body((string)$file->getContent());
 		} catch (\Throwable $e) {
 			$this->logger->error('could not read a call', ['exception' => $e]);
 			throw new BackendException('could not read the call',

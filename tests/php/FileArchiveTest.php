@@ -727,4 +727,23 @@ class FileArchiveTest extends TestCase {
 
 		$this->assertCount(3, $archive->list('alice', 2, 0)['meetings']);
 	}
+
+	public function testTheHeaderIsNotPrintedAboveTheMeeting(): void {
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary.md' => self::SUMMARY,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		], analysisFolder: true);
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
+
+		$summary = $archive->summary('alice', $id);
+		$transcript = $archive->transcript('alice', $id);
+
+		$this->assertStringStartsWith('# Executive Summary', $summary);
+		$this->assertStringNotContainsString('meeting_date:', $summary);
+		$this->assertStringStartsWith('[00:05]', $transcript);
+		$this->assertStringNotContainsString('source_file:', $transcript);
+	}
 }
