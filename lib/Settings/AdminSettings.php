@@ -27,6 +27,16 @@ class AdminSettings implements IDeclarativeSettingsForm {
 	public const KEY_ENABLED = 'transcription_enabled';
 	public const KEY_ROOM_ALLOWLIST = 'room_allowlist';
 	public const KEY_PUBLISH_TO_CHAT = 'publish_to_chat';
+	public const KEY_SERVICE_TOKEN = 'service_token';
+	public const KEY_ANALYSIS_FOLDER = 'analysis_folder';
+	public const KEY_TRANSCRIPTS_FOLDER = 'transcripts_folder';
+	public const KEY_MINUTES_FOLDER = 'minutes_folder';
+	public const KEY_RETENTION_DAYS = 'retention_days';
+
+	/** What the folders are called unless an administrator says otherwise. */
+	public const DEFAULT_ANALYSIS_FOLDER = 'Аналитика встреч';
+	public const DEFAULT_TRANSCRIPTS_FOLDER = 'Транскрипции';
+	public const DEFAULT_MINUTES_FOLDER = 'Протоколы';
 
 	public function __construct(
 		private IL10N $l10n,
@@ -65,6 +75,45 @@ class AdminSettings implements IDeclarativeSettingsForm {
 					'description' => $this->l('When a call ends, share the transcript as a file card in the room. Turn off to keep transcripts in the archive only.'),
 					'type' => DeclarativeSettingsTypes::CHECKBOX,
 					'default' => true,
+				],
+				[
+					'id' => self::KEY_RETENTION_DAYS,
+					'title' => $this->l('Delete meetings after'),
+					'description' => $this->l('Days to keep transcripts and summaries. 0 keeps them indefinitely. The transcription service does the deleting; this only tells it when.'),
+					'type' => DeclarativeSettingsTypes::TEXT,
+					'placeholder' => '0',
+					'default' => '0',
+				],
+				[
+					'id' => self::KEY_SERVICE_TOKEN,
+					'title' => $this->l('Access key'),
+					'description' => $this->l('Shared secret the transcription service presents to read these settings. Put the same value in the service configuration. Leave empty to refuse it access.'),
+					'type' => DeclarativeSettingsTypes::PASSWORD,
+					'default' => '',
+				],
+				[
+					'id' => self::KEY_ANALYSIS_FOLDER,
+					'title' => $this->l('Analysis folder'),
+					'description' => $this->l('Folder under Talk/ where the service writes one folder per analysed call. The archive is read from here.'),
+					'type' => DeclarativeSettingsTypes::TEXT,
+					'placeholder' => self::DEFAULT_ANALYSIS_FOLDER,
+					'default' => self::DEFAULT_ANALYSIS_FOLDER,
+				],
+				[
+					'id' => self::KEY_TRANSCRIPTS_FOLDER,
+					'title' => $this->l('Transcripts folder'),
+					'description' => $this->l('Folder under Talk/ holding the loose transcripts written before the analyser existed.'),
+					'type' => DeclarativeSettingsTypes::TEXT,
+					'placeholder' => self::DEFAULT_TRANSCRIPTS_FOLDER,
+					'default' => self::DEFAULT_TRANSCRIPTS_FOLDER,
+				],
+				[
+					'id' => self::KEY_MINUTES_FOLDER,
+					'title' => $this->l('Minutes folder'),
+					'description' => $this->l('Folder under Talk/ holding the older "Протокол" minutes that pair with those transcripts.'),
+					'type' => DeclarativeSettingsTypes::TEXT,
+					'placeholder' => self::DEFAULT_MINUTES_FOLDER,
+					'default' => self::DEFAULT_MINUTES_FOLDER,
 				],
 			],
 		];

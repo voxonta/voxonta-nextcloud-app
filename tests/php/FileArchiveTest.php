@@ -154,8 +154,14 @@ class FileArchiveTest extends TestCase {
 		$cache->method('createDistributed')->willReturn(
 			$this->createMock(\OCP\ICache::class));
 
+		// Folder names come from the settings; the tests use the defaults, which
+		// is what getValueString returns when nothing was set.
+		$appConfig = $this->createMock(\OCP\IAppConfig::class);
+		$appConfig->method('getValueString')->willReturnCallback(
+			static fn (string $app, string $key, string $default = '') => $default);
+
 		return new FileArchive($root, $shareManager, $users, $db,
-			$this->createMock(LoggerInterface::class), $cache);
+			$this->createMock(LoggerInterface::class), $cache, $appConfig);
 	}
 
 	/**

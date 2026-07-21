@@ -7,6 +7,7 @@ import { createAppConfig } from '@nextcloud/vite-config'
 export default createAppConfig(
 	{
 		main: 'src/main.js',
+		settings: 'src/settings.js',
 	},
 	{
 		// Styles ride inside the JS bundle, so the page needs only addScript —

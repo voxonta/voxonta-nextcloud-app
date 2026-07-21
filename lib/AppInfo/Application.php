@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\AppInfo;
 
 use OCA\DoneTranscription\Listener\BotListener;
+use OCA\DoneTranscription\Settings\AdminSettings;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
@@ -18,6 +19,11 @@ class Application extends App implements IBootstrap {
 	}
 
 	public function register(IRegistrationContext $context): void {
+		// Without this the form exists as a class and nowhere else: Nextcloud
+		// only renders declarative settings it was told about, and an
+		// unregistered one fails silently — no error, no section, nothing.
+		$context->registerDeclarativeSettings(AdminSettings::class);
+
 		// Talk dispatches this instead of calling a webhook when a bot's URL
 		// uses the nextcloudapp:// prefix. That is the whole reason the opt-out
 		// command works in one-to-one calls: there is no REST polling involved,

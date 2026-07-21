@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace OCA\DoneTranscription\Service;
 
+use OCA\DoneTranscription\AppInfo\Application;
+use OCA\DoneTranscription\Settings\AdminSettings;
 use OCA\DoneTranscription\Service\Search\BinaryOperator;
 use OCA\DoneTranscription\Service\Search\Comparison;
 use OCA\DoneTranscription\Service\Search\Order;
@@ -17,6 +19,7 @@ use OCP\Files\Node;
 use OCP\Files\Search\ISearchBinaryOperator;
 use OCP\Files\Search\ISearchComparison;
 use OCP\Files\Search\ISearchOrder;
+use OCP\IAppConfig;
 use OCP\ICacheFactory;
 use OCP\IDBConnection;
 use OCP\IUserManager;
@@ -75,26 +78,11 @@ class FileArchive {
 	private const NAME_PATTERN = '20__-__-__ %';
 
 	/**
-	 * Where the service keeps the files, for the account it writes as and for
-	 * anyone the whole archive is shared to. Listing these directly is the fast
-	 * path; a search across every mount is the slow fallback for participants
-	 * who only have scattered shares.
+	 * Where the service keeps its files, all under Talk/: the analyser's tree
+	 * and the two folders of loose transcripts beside it. The names are
+	 * configurable — they are the service's, not Nextcloud's — so they are read
+	 * through analysisFolderName() and ownFolders() rather than named here.
 	 */
-	private const OWN_FOLDERS = ['Talk/Транскрипции', 'Talk/Протоколы'];
-
-	/** The folder names, for finding a shared-in copy wherever it was mounted. */
-	private const OWN_FOLDER_NAMES = ['Транскрипции', 'Протоколы'];
-
-	/**
-	 * The analyser's tree: <date>/<NNN>_<topic>/{01_…,10_…}.
-	 *
-	 * Where a call is whole — the transcript and the summary in one folder —
-	 * so wherever this is readable it is the archive, and the loose transcripts
-	 * the service also writes are the same calls a second time. They are read
-	 * only for the months before the analyser existed; see cutoff().
-	 */
-	private const ANALYSIS_FOLDER = 'Talk/Аналитика встреч';
-	private const ANALYSIS_FOLDER_NAME = 'Аналитика встреч';
 
 	/**
 	 * Upper bound on transcripts a search returns. Passing 0 for "no limit"
@@ -136,6 +124,7 @@ class FileArchive {
 		private IDBConnection $db,
 		private LoggerInterface $logger,
 		private ICacheFactory $cacheFactory,
+		private IAppConfig $appConfig,
 	) {
 	}
 
@@ -595,6 +584,52 @@ class FileArchive {
 	}
 
 	/**
+	 * Where the service keeps its files, all under Talk/.
+	 *
+	 * Configurable because the names are the service's, not Nextcloud's, and an
+	 * instance that renamed them — or runs the service in another language —
+	 * would otherwise see an empty archive with nothing to explain it. The
+	 * defaults are what the service writes today.
+	 *
+	 * The analyser's tree is <date>/<NNN>_<topic>/{01_…,10_…}: a call is whole
+	 * there, transcript and summary together, so wherever it is readable it is
+	 * the archive. The loose transcripts beside it are the same calls a second
+	 * time, and are read only for the months before the analyser existed
+	 * (see cutoff()).
+	 */
+	private function analysisFolderName(): string {
+		return $this->folderName(AdminSettings::KEY_ANALYSIS_FOLDER,
+			AdminSettings::DEFAULT_ANALYSIS_FOLDER);
+	}
+
+	/** @return string[] the loose-transcript folders, as paths under the user's root */
+	private function ownFolders(): array {
+		return ['Talk/' . $this->transcriptsFolderName(),
+			'Talk/' . $this->minutesFolderName()];
+	}
+
+	/** @return string[] the same two, by name, for finding a shared-in copy */
+	private function ownFolderNames(): array {
+		return [$this->transcriptsFolderName(), $this->minutesFolderName()];
+	}
+
+	private function transcriptsFolderName(): string {
+		return $this->folderName(AdminSettings::KEY_TRANSCRIPTS_FOLDER,
+			AdminSettings::DEFAULT_TRANSCRIPTS_FOLDER);
+	}
+
+	private function minutesFolderName(): string {
+		return $this->folderName(AdminSettings::KEY_MINUTES_FOLDER,
+			AdminSettings::DEFAULT_MINUTES_FOLDER);
+	}
+
+	/** A configured folder name, falling back to the default when blank. */
+	private function folderName(string $key, string $default): string {
+		$name = trim($this->appConfig->getValueString(Application::APP_ID, $key, $default));
+		return $name === '' ? $default : $name;
+	}
+
+	/**
 	 * The day a candidate belongs to, "YYYY-MM-DD": from the analyser's path,
 	 * or from the filename of a loose transcript.
 	 *
@@ -613,7 +648,7 @@ class FileArchive {
 	 */
 	private function analysisFolderId(string $userId, Folder $userFolder): ?int {
 		try {
-			$folder = $userFolder->get(self::ANALYSIS_FOLDER);
+			$folder = $userFolder->get('Talk/' . $this->analysisFolderName());
 			if ($folder instanceof Folder) {
 				return $folder->getId();
 			}
@@ -623,7 +658,7 @@ class FileArchive {
 
 		foreach ($this->sharesOf($userId) as $share) {
 			if ($share->getNodeType() === 'folder'
-				&& basename($share->getTarget()) === self::ANALYSIS_FOLDER_NAME) {
+				&& basename($share->getTarget()) === $this->analysisFolderName()) {
 				return $share->getNodeId();
 			}
 		}
@@ -736,7 +771,7 @@ class FileArchive {
 		$ids = [];
 
 		// The owner's own copies (the service account), by their known path.
-		foreach (self::OWN_FOLDERS as $path) {
+		foreach ($this->ownFolders() as $path) {
 			try {
 				$folder = $userFolder->get($path);
 				if ($folder instanceof Folder) {
@@ -751,7 +786,7 @@ class FileArchive {
 		foreach ($this->sharesOf($userId) as $share) {
 			if ($share->getNodeType() === 'folder'
 				&& in_array(basename($share->getTarget()),
-					self::OWN_FOLDER_NAMES, true)) {
+					$this->ownFolderNames(), true)) {
 				$ids[$share->getNodeId()] = true;
 			}
 		}

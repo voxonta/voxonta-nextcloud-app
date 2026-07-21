@@ -14,10 +14,12 @@ turned into a summary with decisions and action items.
 Participants can stop recording at any time by posting a command in the room
 chat; one-to-one calls are only transcribed once the second person answers.
 
-Call audio is captured by a separate transcription service, which this app talks
-to. The administrator enters its address and token in the admin settings.
+Call audio is captured by a separate transcription service running outside
+Nextcloud. It reads its settings from here — whether to transcribe, which
+conversations, how long to keep the results — using an access key the
+administrator sets in the admin settings and enters in the service as well.
     ]]></description>
-    <version>2.1.5</version>
+    <version>2.2.0</version>
     <licence>agpl</licence>
     <author>Done</author>
     <namespace>DoneTranscription</namespace>
@@ -37,6 +39,10 @@ to. The administrator enters its address and token in the admin settings.
             <order>10</order>
         </navigation>
     </navigations>
+	<settings>
+		<admin>OCA\DoneTranscription\Settings\ServiceStatus</admin>
+	</settings>
+
 	<background-jobs>
 		<job>OCA\DoneTranscription\BackgroundJob\WarmHeaderCache</job>
 	</background-jobs>
