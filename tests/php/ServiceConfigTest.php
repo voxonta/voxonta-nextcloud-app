@@ -84,13 +84,25 @@ class ServiceConfigTest extends TestCase {
 			$this->config()->forService()['rooms']);
 	}
 
+	public function testNothingInTheSettingsCanOrderADeletion(): void {
+		$this->stored[AdminSettings::KEY_SERVICE_TOKEN] = 's3cret';
+
+		$settings = $this->config()->forService();
+
+		// A retention period was drafted and dropped: the files are the only
+		// copy of what was said, and no field here should be able to remove
+		// them. If one is ever added, this test is the argument against it.
+		$this->assertSame([], array_filter(array_keys($settings),
+			static fn (string $k) => str_contains($k, 'retention')
+				|| str_contains($k, 'delete')));
+	}
+
 	public function testAnUnsetInstanceGetsTheDefaults(): void {
 		$settings = $this->config()->forService();
 
 		$this->assertTrue($settings['enabled']);
 		$this->assertTrue($settings['publish_to_chat']);
 		$this->assertSame([], $settings['rooms'], 'empty means every call');
-		$this->assertSame(0, $settings['retention_days'], 'keep indefinitely');
 		$this->assertSame(AdminSettings::DEFAULT_ANALYSIS_FOLDER,
 			$settings['folders']['analysis']);
 	}
@@ -100,12 +112,6 @@ class ServiceConfigTest extends TestCase {
 
 		$this->assertSame(AdminSettings::DEFAULT_ANALYSIS_FOLDER,
 			$this->config()->forService()['folders']['analysis']);
-	}
-
-	public function testANegativeRetentionIsNotADeletionOrder(): void {
-		$this->stored[AdminSettings::KEY_RETENTION_DAYS] = '-5';
-
-		$this->assertSame(0, $this->config()->forService()['retention_days']);
 	}
 
 	// ── the connection an administrator sees ───────────────────────────────

@@ -31,7 +31,6 @@ class AdminSettings implements IDeclarativeSettingsForm {
 	public const KEY_ANALYSIS_FOLDER = 'analysis_folder';
 	public const KEY_TRANSCRIPTS_FOLDER = 'transcripts_folder';
 	public const KEY_MINUTES_FOLDER = 'minutes_folder';
-	public const KEY_RETENTION_DAYS = 'retention_days';
 
 	/** What the folders are called unless an administrator says otherwise. */
 	public const DEFAULT_ANALYSIS_FOLDER = 'Аналитика встреч';
@@ -75,14 +74,6 @@ class AdminSettings implements IDeclarativeSettingsForm {
 					'description' => $this->l('When a call ends, share the transcript as a file card in the room. Turn off to keep transcripts in the archive only.'),
 					'type' => DeclarativeSettingsTypes::CHECKBOX,
 					'default' => true,
-				],
-				[
-					'id' => self::KEY_RETENTION_DAYS,
-					'title' => $this->l('Delete meetings after'),
-					'description' => $this->l('Days to keep transcripts and summaries. 0 keeps them indefinitely. The transcription service does the deleting; this only tells it when.'),
-					'type' => DeclarativeSettingsTypes::TEXT,
-					'placeholder' => '0',
-					'default' => '0',
 				],
 				[
 					'id' => self::KEY_SERVICE_TOKEN,

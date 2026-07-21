@@ -46,8 +46,6 @@
         "Download transcript": "Скачать транскрипт",
         "summary": "саммари",
         "transcript": "транскрипт",
-        "Delete meetings after": "Удалять встречи через",
-        "Days to keep transcripts and summaries. 0 keeps them indefinitely. The transcription service does the deleting; this only tells it when.": "Сколько дней хранить транскрипты и саммари. 0 — хранить бессрочно. Удаляет сам сервис транскрибации; здесь только срок.",
         "Access key": "Ключ доступа",
         "Shared secret the transcription service presents to read these settings. Put the same value in the service configuration. Leave empty to refuse it access.": "Общий секрет, по которому сервис транскрибации читает эти настройки. Тот же самый впишите в конфигурацию сервиса. Пустое значение закрывает доступ.",
         "Analysis folder": "Папка анализа",

@@ -66,6 +66,11 @@ class ServiceConfig {
 	 * The token itself is never in here: the service already has it, and a
 	 * response that echoes a secret ends up in logs.
 	 *
+	 * Nothing here can order a deletion, deliberately. A retention period was
+	 * drafted and taken out: these files are the only copy of what was said in
+	 * a call, and a wrong number in a settings form is not an acceptable way to
+	 * lose them. Deleting stays a thing a person does to their own files.
+	 *
 	 * @return array<string, mixed>
 	 */
 	public function forService(): array {
@@ -77,8 +82,6 @@ class ServiceConfig {
 			// A list, not the raw string: every caller would otherwise split it
 			// themselves, and one of them would split it differently.
 			'rooms' => $this->rooms(),
-			'retention_days' => max(0, (int)$this->appConfig->getValueString(
-				Application::APP_ID, AdminSettings::KEY_RETENTION_DAYS, '0')),
 			'folders' => [
 				'analysis' => $this->folder(AdminSettings::KEY_ANALYSIS_FOLDER,
 					AdminSettings::DEFAULT_ANALYSIS_FOLDER),
