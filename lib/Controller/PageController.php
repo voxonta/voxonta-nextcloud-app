@@ -23,10 +23,6 @@ class PageController extends Controller {
 	#[NoAdminRequired]
 	#[NoCSRFRequired]
 	public function index(): TemplateResponse {
-		// Nextcloud's own sharing panel, so permissions are managed here the way
-		// they are managed everywhere else in the instance rather than through
-		// a second, half-built dialog of our own.
-		Util::addScript('files', 'sidebar');
 		Util::addScript(Application::APP_ID, Application::APP_ID . '-main');
 		return new TemplateResponse(Application::APP_ID, 'main');
 	}

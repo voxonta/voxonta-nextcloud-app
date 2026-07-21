@@ -48,13 +48,13 @@
 						<template #icon>
 							<ShareIcon :size="20" />
 						</template>
-						{{ t('done_transcription', 'Access to the transcript') }}
+						{{ t('done_transcription', 'Manage access: transcript') }}
 					</NcActionButton>
 					<NcActionButton @click="share('summary')">
 						<template #icon>
 							<ShareIcon :size="20" />
 						</template>
-						{{ t('done_transcription', 'Access to the summary') }}
+						{{ t('done_transcription', 'Manage access: summary') }}
 					</NcActionButton>
 				</NcActions>
 			</div>
@@ -119,12 +119,6 @@
 </template>
 
 <script>
-import {
-	davGetClient,
-	davGetDefaultPropfind,
-	davResultToNode,
-	davRootPath,
-} from '@nextcloud/files'
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
@@ -273,14 +267,13 @@ export default {
 		},
 
 		/**
-		 * Open Nextcloud's own sharing panel on one of the meeting's files.
+		 * Open the meeting's file in Files, where its permissions are managed.
 		 *
-		 * The panel is Files' own, so permissions here are the same permissions
-		 * as everywhere else in the instance. In Nextcloud 33 it is a Pinia
-		 * store reached through OCA.Files._sidebar() and it takes a Node, not a
-		 * path — hence the DAV lookup. That entry point is private, so a
-		 * failure falls back to opening the file in Files, where the same panel
-		 * lives behind a stable URL.
+		 * Not a panel of our own: these are ordinary Nextcloud files and their
+		 * sharing is ordinary Nextcloud sharing, so the place to change it is
+		 * the one people already know. Nextcloud 33 will not open that panel
+		 * from outside Files — it needs an active folder and view, and refuses
+		 * without one — so this opens the file where the panel lives.
 		 *
 		 * @param {string} which 'summary' or 'transcript'
 		 */
@@ -295,47 +288,17 @@ export default {
 			}
 
 			const path = paths[which]
-			if (!path) {
+			const fileId = paths[which + '_id']
+			if (!path || !fileId) {
 				this.warn(t('done_transcription', 'This meeting has no such file.'))
 				return
 			}
 
-			try {
-				const client = davGetClient()
-				const result = await client.stat(davRootPath + path, {
-					details: true,
-					data: davGetDefaultPropfind(),
-				})
-				const node = davResultToNode(result.data)
-				const sidebar = window.OCA?.Files?._sidebar?.()
-				if (!sidebar?.open) {
-					throw new Error('no sidebar')
-				}
-				// Open first: the tabs are registered against the node, so
-				// asking for 'sharing' before there is one is refused outright
-				// ("not available for the current context").
-				sidebar.open(node)
-				await this.$nextTick()
-				try {
-					sidebar.setActiveTab('sharing')
-				} catch (e) {
-					// The panel is open on the file either way; which tab it
-					// landed on is not worth failing over.
-					console.warn('could not select the sharing tab', e)
-				}
-			} catch (e) {
-				console.error('failed to open the sharing panel', e)
-				this.openInFiles(paths[which + '_id'])
-			}
-		},
-
-		/** Last resort: the same panel, in Files. */
-		openInFiles(fileId) {
-			if (!fileId) {
-				this.warn(t('done_transcription', 'Sharing is unavailable here.'))
-				return
-			}
-			window.open(generateUrl('/f/{fileId}', { fileId }), '_blank', 'noopener')
+			// The folder as well as the id: without it Files cannot place the
+			// file and answers "not found".
+			const dir = path.slice(0, path.lastIndexOf('/')) || '/'
+			const url = generateUrl('/apps/files/files/{fileId}?dir={dir}', { fileId, dir })
+			window.open(url, '_blank', 'noopener')
 		},
 
 		async loadSummary() {
