@@ -402,34 +402,33 @@ export default {
 	border-bottom: 1px solid var(--color-border);
 }
 
-/* The search takes the room; the period is only as wide as its label. */
+/* Both controls ship a vertical margin — the text field on top, the select on
+   the bottom — and with the two sitting side by side those opposite margins are
+   what made them look misaligned. Zero them and align on the flex centre line. */
+.meeting-list__filters > * {
+	margin: 0;
+}
+
 .meeting-list__search {
 	flex: 1 1 auto;
 	min-width: 0;
 }
 
+.meeting-list__search :deep(.input-field) {
+	margin: 0;
+}
+
+/* NcSelect sets min-width: 260px on its inner toggle, which is why a width on
+   the wrapper did nothing — the min-width has to be cleared where it is set. */
 .meeting-list__period {
 	flex: 0 0 auto;
 	width: 150px;
 }
 
-/* NcSelect carries its own minimum width and internal container, so the width
-   has to be set on the inner element, not just the wrapper — otherwise it
-   stretches far wider than its content. */
-.meeting-list__period :deep(.v-select) {
+.meeting-list__period :deep(.v-select),
+.meeting-list__period :deep(.vs__dropdown-toggle) {
 	min-width: 0;
 	width: 150px;
-}
-
-/* Line the two controls up on the same height: NcTextField's stacked-form top
-   margin would otherwise push it below the select. */
-.meeting-list__search :deep(.input-field) {
-	margin: 0;
-}
-
-.meeting-list__filters :deep(.input-field__input),
-.meeting-list__period :deep(.v-select) {
-	min-height: var(--default-clickable-area);
 }
 
 .meeting-list {
