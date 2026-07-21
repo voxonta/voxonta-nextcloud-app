@@ -471,6 +471,74 @@ class FileArchive {
 	}
 
 	/**
+	 * Parse the headers of analysed calls that have not been read yet.
+	 *
+	 * Called from a background job so a search never has to open a couple of
+	 * thousand files while someone waits. Nothing here decides who sees what —
+	 * it only fills the parse cache, which is keyed by file id and holds what
+	 * the header says, not who may read it. A person still only ever sees the
+	 * calls their own shares bring them.
+	 *
+	 * @return int how many were read this round
+	 */
+	public function warmUp(int $limit): int {
+		try {
+			$qb = $this->db->getQueryBuilder();
+			$qb->select('f.fileid', 'f.name', 's.id')
+				->from('filecache', 'f')
+				->innerJoin('f', 'storages', 's', 'f.storage = s.numeric_id')
+				->where($qb->expr()->in('f.name',
+					$qb->createNamedParameter(
+						[self::ANALYSIS_SUMMARY . '.md', self::ANALYSIS_TRANSCRIPT . '.md'],
+						IQueryBuilder::PARAM_STR_ARRAY)));
+			$result = $qb->executeQuery();
+			$rows = $result->fetchAll();
+			$result->closeCursor();
+		} catch (\Throwable $e) {
+			$this->logger->warning('could not list the analysed calls to warm',
+				['exception' => $e]);
+			return 0;
+		}
+
+		$cache = $this->headerCache();
+		$folders = [];
+		$warmed = 0;
+
+		foreach ($rows as $row) {
+			if ($warmed >= $limit) {
+				break;
+			}
+			$id = (int)$row['fileid'];
+			$summaryOnly = str_starts_with((string)$row['name'], self::ANALYSIS_SUMMARY);
+			$key = ($summaryOnly ? 's' : 't') . $id;
+			if ($cache->get($key) !== null) {
+				continue;
+			}
+
+			// The owner's own tree, from the storage id — "home::transcriber".
+			$owner = substr((string)$row['id'], 6);
+			if (!str_starts_with((string)$row['id'], 'home::') || $owner === '') {
+				continue;
+			}
+			try {
+				$folders[$owner] ??= $this->rootFolder->getUserFolder($owner);
+				$nodes = $folders[$owner]->getById($id);
+				$file = $nodes[0] ?? null;
+				if (!$file instanceof File) {
+					continue;
+				}
+				$cache->set($key, $this->readMetadata($file, $summaryOnly) ?? [],
+					30 * 24 * 3600);
+				$warmed++;
+			} catch (\Throwable $e) {
+				$this->logger->warning('could not warm call {id}',
+					['id' => $id, 'exception' => $e]);
+			}
+		}
+		return $warmed;
+	}
+
+	/**
 	 * The day a candidate belongs to, "YYYY-MM-DD": from the analyser's path,
 	 * or from the filename of a loose transcript.
 	 *
