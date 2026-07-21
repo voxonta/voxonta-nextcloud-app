@@ -25,33 +25,32 @@ class Application extends App implements IBootstrap {
 		// unregistered one fails silently — no error, no section, nothing.
 		$context->registerDeclarativeSettings(AdminSettings::class);
 
-		// Talk dispatches this instead of calling a webhook when a bot's URL
-		// uses the nextcloudapp:// prefix. That is the whole reason the opt-out
-		// command works in one-to-one calls: there is no REST polling involved,
-		// Talk hands us the message directly.
+		// Talk's events, registered by name and unconditionally.
 		//
-		// Registered conditionally because the app must still install on an
-		// instance without Talk — the archive is useful on its own, and a
-		// missing class here would break the whole app, not just the bot.
-		if (class_exists('\OCA\Talk\Events\BotInvokeEvent')) {
-			$context->registerEventListener(
-				'\OCA\Talk\Events\BotInvokeEvent',
-				BotListener::class,
-			);
-		}
+		// By name because that is all registerEventListener needs; on an
+		// instance without Talk they simply never fire, and the archive works on
+		// its own. Not behind class_exists: apps register before every other
+		// app's classes are loadable, so that check can be false at this moment
+		// and true forever after — which is what happened, leaving the listeners
+		// unregistered with nothing in the log to say so.
+		//
+		// BotInvokeEvent is how Talk hands a bot its messages when the bot's URL
+		// uses the nextcloudapp:// prefix — that is why the opt-out command
+		// works in one-to-one calls, where there is no webhook.
+		$context->registerEventListener(
+			'OCA\Talk\Events\BotInvokeEvent',
+			BotListener::class,
+		);
 
-		// What replaces reading Nextcloud's database over an SSH tunnel: Talk
-		// says when a call starts and ends, and the capture service asks us.
-		// Registered by name for the same reason as above — the app installs on
-		// an instance without Talk, where these classes do not exist.
+		// And these replace reading Nextcloud's database over an SSH tunnel:
+		// Talk says when a call starts and ends, the capture service asks us
+		// which are live.
 		foreach ([
-			'\OCA\Talk\Events\CallStartedEvent',
-			'\OCA\Talk\Events\CallEndedEvent',
-			'\OCA\Talk\Events\CallEndedForEveryoneEvent',
+			'OCA\Talk\Events\CallStartedEvent',
+			'OCA\Talk\Events\CallEndedEvent',
+			'OCA\Talk\Events\CallEndedForEveryoneEvent',
 		] as $event) {
-			if (class_exists($event)) {
-				$context->registerEventListener($event, CallListener::class);
-			}
+			$context->registerEventListener($event, CallListener::class);
 		}
 	}
 
