@@ -311,10 +311,18 @@ export default {
 				if (!sidebar?.open) {
 					throw new Error('no sidebar')
 				}
-				// The tab is set first: setting it afterwards races the panel's
-				// own load and lands on the details tab.
-				sidebar.setActiveTab('sharing')
+				// Open first: the tabs are registered against the node, so
+				// asking for 'sharing' before there is one is refused outright
+				// ("not available for the current context").
 				sidebar.open(node)
+				await this.$nextTick()
+				try {
+					sidebar.setActiveTab('sharing')
+				} catch (e) {
+					// The panel is open on the file either way; which tab it
+					// landed on is not worth failing over.
+					console.warn('could not select the sharing tab', e)
+				}
 			} catch (e) {
 				console.error('failed to open the sharing panel', e)
 				this.openInFiles(paths[which + '_id'])
