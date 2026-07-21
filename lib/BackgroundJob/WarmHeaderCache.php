@@ -23,7 +23,12 @@ use Psr\Log\LoggerInterface;
  * not within the minute.
  */
 class WarmHeaderCache extends TimedJob {
-	private const BATCH = 250;
+	/**
+	 * Files per run. Around ten seconds of work — long enough to refill a few
+	 * thousand calls within minutes of an app update (which empties the cache),
+	 * short enough not to hold up the other jobs sharing the cron run.
+	 */
+	private const BATCH = 750;
 
 	public function __construct(
 		ITimeFactory $time,
