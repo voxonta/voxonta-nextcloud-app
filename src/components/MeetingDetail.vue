@@ -22,11 +22,9 @@
 			</p>
 
 			<!--
-				Taking a meeting out of here and giving someone access to it are
-				the two things people want besides reading. Access is Nextcloud's
-				own panel — the same one as in Files — because permissions on
-				these files are ordinary Nextcloud permissions, and a second
-				dialog of our own would only be a worse copy that drifts.
+				Taking the meeting away with you: the summary is what people
+				forward, the transcript what they keep. Permissions are not here
+				— these are ordinary Nextcloud files, managed in Files.
 			-->
 			<div class="meeting-detail__actions">
 				<NcActions :inline="2">
@@ -43,18 +41,6 @@
 							<DownloadIcon :size="20" />
 						</template>
 						{{ t('done_transcription', 'Download transcript') }}
-					</NcActionButton>
-					<NcActionButton v-if="meeting.has_transcript !== false" @click="share('transcript')">
-						<template #icon>
-							<ShareIcon :size="20" />
-						</template>
-						{{ t('done_transcription', 'Manage access: transcript') }}
-					</NcActionButton>
-					<NcActionButton @click="share('summary')">
-						<template #icon>
-							<ShareIcon :size="20" />
-						</template>
-						{{ t('done_transcription', 'Manage access: summary') }}
 					</NcActionButton>
 				</NcActions>
 			</div>
@@ -120,7 +106,6 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import { generateUrl } from '@nextcloud/router'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActions from '@nextcloud/vue/components/NcActions'
 import NcButton from '@nextcloud/vue/components/NcButton'
@@ -129,10 +114,9 @@ import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcRichText from '@nextcloud/vue/components/NcRichText'
 import AlertIcon from 'vue-material-design-icons/AlertCircle.vue'
 import DownloadIcon from 'vue-material-design-icons/Download.vue'
-import ShareIcon from 'vue-material-design-icons/ShareVariant.vue'
 import MicrophoneOffIcon from 'vue-material-design-icons/MicrophoneOff.vue'
 import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
-import { fetchPaths, fetchSummary, fetchTranscript } from '../api.js'
+import { fetchSummary, fetchTranscript } from '../api.js'
 
 export default {
 	name: 'MeetingDetail',
@@ -147,7 +131,6 @@ export default {
 		AlertIcon,
 		DownloadIcon,
 		MicrophoneOffIcon,
-		ShareIcon,
 		TextIcon,
 	},
 
@@ -264,41 +247,6 @@ export default {
 			link.download = name
 			link.click()
 			URL.revokeObjectURL(url)
-		},
-
-		/**
-		 * Open the meeting's file in Files, where its permissions are managed.
-		 *
-		 * Not a panel of our own: these are ordinary Nextcloud files and their
-		 * sharing is ordinary Nextcloud sharing, so the place to change it is
-		 * the one people already know. Nextcloud 33 will not open that panel
-		 * from outside Files — it needs an active folder and view, and refuses
-		 * without one — so this opens the file where the panel lives.
-		 *
-		 * @param {string} which 'summary' or 'transcript'
-		 */
-		async share(which) {
-			let paths
-			try {
-				paths = await fetchPaths(this.meeting.session_id)
-			} catch (e) {
-				console.error('failed to locate the meeting files', e)
-				this.warn(t('done_transcription', 'Could not open sharing.'))
-				return
-			}
-
-			const path = paths[which]
-			const fileId = paths[which + '_id']
-			if (!path || !fileId) {
-				this.warn(t('done_transcription', 'This meeting has no such file.'))
-				return
-			}
-
-			// The folder as well as the id: without it Files cannot place the
-			// file and answers "not found".
-			const dir = path.slice(0, path.lastIndexOf('/')) || '/'
-			const url = generateUrl('/apps/files/files/{fileId}?dir={dir}', { fileId, dir })
-			window.open(url, '_blank', 'noopener')
 		},
 
 		async loadSummary() {

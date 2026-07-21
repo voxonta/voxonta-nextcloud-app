@@ -71,23 +71,6 @@ class ArchiveController extends Controller {
 	}
 
 	/**
-	 * Where the meeting's files live, so the page can open Nextcloud's own
-	 * sharing panel on them. Paths only — no permission is granted here.
-	 */
-	#[NoAdminRequired]
-	#[NoCSRFRequired]
-	public function paths(string $sessionId): JSONResponse {
-		if (!$this->identified()) {
-			return $this->unauthorised();
-		}
-		try {
-			return new JSONResponse($this->archive->paths($this->userId, $sessionId));
-		} catch (BackendException $e) {
-			return new JSONResponse(['message' => $e->getMessage()], $e->getStatus());
-		}
-	}
-
-	/**
 	 * The summary — what people open first, and usually all they read.
 	 */
 	#[NoAdminRequired]

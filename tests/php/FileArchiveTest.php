@@ -815,33 +815,4 @@ class FileArchiveTest extends TestCase {
 		$this->assertSame('Дейли', $meetings[0]['room_name']);
 	}
 
-	// ── paths for the sharing panel ────────────────────────────────────────
-	public function testTheSharingPanelGetsBothFilesOwnPaths(): void {
-		$archive = $this->archive([
-			'10_Original_Transcript.md' => self::ANALYSIS,
-			'01_Executive_Summary.md' => self::SUMMARY,
-		], index: [
-			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
-			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
-		], analysisFolder: true);
-		$id = $archive->list('alice')['meetings'][0]['session_id'];
-
-		$paths = $archive->paths('alice', $id);
-
-		// As the user sees them — the "/alice/files" prefix is not a path
-		// Nextcloud's panel would accept.
-		$this->assertSame('/Talk/10_Original_Transcript.md', $paths['transcript']);
-		$this->assertSame('/Talk/01_Executive_Summary.md', $paths['summary']);
-	}
-
-	public function testAskingForTheFilesOfAnUnknownCallIsRefused(): void {
-		$archive = $this->archive($this->transcriptFile());
-
-		try {
-			$archive->paths('alice', '999999');
-			$this->fail('expected a refusal');
-		} catch (BackendException $e) {
-			$this->assertSame(Http::STATUS_NOT_FOUND, $e->getStatus());
-		}
-	}
 }

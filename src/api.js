@@ -80,19 +80,6 @@ export async function fetchRooms() {
 }
 
 /**
- * Where the meeting's two files sit in the user's own tree.
- *
- * Only for opening Nextcloud's sharing panel on them — the panel, not this app,
- * is what grants anything.
- *
- * @param {string} sessionId meeting id
- * @return {Promise<{transcript: string, summary: string}>}
- */
-export async function fetchPaths(sessionId) {
-	return request(`/meetings/${encodeURIComponent(sessionId)}/paths`)
-}
-
-/**
  * The summary: what people open, and usually all they read.
  *
  * @param {string} sessionId meeting id

@@ -14,7 +14,6 @@ return [
 
 		['name' => 'archive#meetings', 'url' => '/api/v1/meetings', 'verb' => 'GET'],
 		['name' => 'archive#rooms', 'url' => '/api/v1/rooms', 'verb' => 'GET'],
-		['name' => 'archive#paths', 'url' => '/api/v1/meetings/{sessionId}/paths', 'verb' => 'GET'],
 		['name' => 'archive#summary', 'url' => '/api/v1/meetings/{sessionId}/summary', 'verb' => 'GET'],
 		['name' => 'archive#transcript', 'url' => '/api/v1/meetings/{sessionId}/transcript', 'verb' => 'GET'],
 	],

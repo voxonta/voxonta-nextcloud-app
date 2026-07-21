@@ -44,13 +44,8 @@
         "Conversation": "Чат",
         "Download summary": "Скачать саммари",
         "Download transcript": "Скачать транскрипт",
-        "Manage access: transcript": "Настроить доступ: транскрипт",
-        "Manage access: summary": "Настроить доступ: саммари",
         "summary": "саммари",
-        "transcript": "транскрипт",
-        "Sharing is unavailable here.": "Управление доступом здесь недоступно.",
-        "This meeting has no such file.": "У этой встречи нет такого файла.",
-        "Could not open sharing.": "Не удалось открыть управление доступом."
+        "transcript": "транскрипт"
     },
     "pluralForm": "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);"
 }

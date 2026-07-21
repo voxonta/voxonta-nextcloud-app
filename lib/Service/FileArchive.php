@@ -595,42 +595,6 @@ class FileArchive {
 	}
 
 	/**
-	 * Where a meeting's two files sit in this person's own tree, for Nextcloud's
-	 * sharing panel to open on.
-	 *
-	 * Paths, not ids: the panel takes the path as the user sees it, which for a
-	 * recipient is wherever they mounted the share.
-	 *
-	 * @return array{transcript: string, summary: string}
-	 * @throws BackendException
-	 */
-	public function paths(string $userId, string $sessionId): array {
-		$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
-		if ($entry === null) {
-			throw new BackendException('not found', Http::STATUS_NOT_FOUND);
-		}
-
-		$transcript = isset($entry['summary_only']) ? null : $this->resolve($userId, $entry);
-		$summary = $this->summaryFile($userId, $entry);
-
-		// The ids come along for the fallback: opening the file in Files needs
-		// an id, not a path.
-		return [
-			'transcript' => $transcript === null ? '' : $this->userPath($userId, $transcript),
-			'transcript_id' => $transcript === null ? 0 : $transcript->getId(),
-			'summary' => $summary === null ? '' : $this->userPath($userId, $summary),
-			'summary_id' => $summary === null ? 0 : $summary->getId(),
-		];
-	}
-
-	/** A node's path as the user sees it: "/Talk/…", not "/alice/files/Talk/…". */
-	private function userPath(string $userId, File $file): string {
-		$prefix = '/' . $userId . '/files';
-		$path = $file->getPath();
-		return str_starts_with($path, $prefix) ? substr($path, strlen($prefix)) : $path;
-	}
-
-	/**
 	 * The day a candidate belongs to, "YYYY-MM-DD": from the analyser's path,
 	 * or from the filename of a loose transcript.
 	 *
