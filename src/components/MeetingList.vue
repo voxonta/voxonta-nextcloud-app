@@ -32,7 +32,7 @@
 				:clearable="false"
 				label="label"
 				:aria-label-combobox="t('done_transcription', 'Period')"
-				@input="onFilterChange" />
+				@update:model-value="onFilterChange" />
 		</div>
 
 		<div ref="scroll" class="meeting-list" @scroll.passive="onScroll">
