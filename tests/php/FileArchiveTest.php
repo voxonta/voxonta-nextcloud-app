@@ -403,15 +403,31 @@ class FileArchiveTest extends TestCase {
 		$this->assertSame([], $archive->list('alice')['meetings']);
 	}
 
-	public function testSearchMatchesTheFilename(): void {
+	public function testSearchMatchesTheMeetingName(): void {
+		$other = str_replace('Вадим Куницын, Алексей Морозов',
+			'Дарья Костусенко, Алексей Морозов', self::TRANSCRIPT);
 		$archive = $this->archive([
 			'2026-03-05 14-49-00 - Встреча с Вадимом.md' => self::TRANSCRIPT,
-			'2026-03-06 10-00-00 - Встреча с Дарьей.md' => self::TRANSCRIPT,
+			'2026-03-06 10-00-00 - Встреча с Дарьей.md' => $other,
 		]);
 
 		$meetings = $archive->list('alice', 50, 0, 'Вадим')['meetings'];
 
 		$this->assertCount(1, $meetings);
+	}
+
+	public function testSearchMatchesAParticipant(): void {
+		// The name people search by is often not in the meeting's title at all.
+		$archive = $this->archive([
+			'2026-03-05 14-49-00 - Планёрка.md' => self::TRANSCRIPT,
+			'2026-03-06 10-00-00 - Ретро.md' => str_replace(
+				'Вадим Куницын, Алексей Морозов', 'Дарья Костусенко', self::TRANSCRIPT),
+		]);
+
+		$meetings = $archive->list('alice', 50, 0, 'Костусенко')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('Ретро', $meetings[0]['room_name']);
 	}
 
 	public function testSearchIsCaseInsensitive(): void {

@@ -1158,8 +1158,7 @@ class FileArchive {
 		if ($query === '') {
 			return true;
 		}
-		$haystack = isset($entry['folder']) ? $this->searchText($userId, $entry) : $name;
-		return mb_stripos($haystack, $query) !== false;
+		return mb_stripos($this->searchText($userId, $entry), $query) !== false;
 	}
 
 	/**
@@ -1169,16 +1168,17 @@ class FileArchive {
 	 * @param array<string, mixed> $entry
 	 */
 	private function searchText(string $userId, array $entry): string {
-		$file = $this->resolve($userId, $entry);
-		$head = $file === null ? null : $this->head($file);
-		if ($head === null) {
-			return '';
-		}
-		$meta = $this->fromYaml($head) ?? $this->fromSummary(ltrim($head));
+		// Through the same cache the listing fills, so a search costs nothing
+		// for calls already shown. Going straight to the files instead meant
+		// re-opening every one of them on each keystroke — twelve seconds, long
+		// enough that the search read as broken.
+		$meta = $this->metadataFor($userId, $entry);
 		if ($meta === null) {
-			return '';
+			// Not a call, or unreadable: the filename is all there is, and for
+			// the older files it holds the date and the people anyway.
+			return (string)$entry['name'];
 		}
-		return (string)($meta['meeting_name'] ?? '')
+		return (string)($meta['room_name'] ?? '')
 			. ' ' . implode(' ', $meta['participants'] ?? []);
 	}
 
