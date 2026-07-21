@@ -29,7 +29,14 @@
 				<NcRichText :text="summary" :use-extended-markdown="true" />
 			</section>
 
-			<section class="meeting-detail__section">
+			<!--
+				Calls from before the service shared the transcript are their
+				summary and nothing else: no transcript to offer, and no empty
+				"nobody spoke" to explain away.
+			-->
+			<section
+				v-if="meeting.has_transcript !== false"
+				class="meeting-detail__section">
 				<!--
 					When there are minutes, the transcript is the evidence behind
 					them and waits behind a click. When there are none — the

@@ -46,6 +46,12 @@ class FileArchiveTest extends TestCase {
 	private const SUMMARY = "---\nmeeting_date: '2026-07-20'\n---\n\n"
 		. "# Executive Summary\n\nРешили передать задачу.\n";
 
+	/** A summary from before the transcript was shared beside it. */
+	private const SUMMARY_ALONE = "---\nmeeting_date: '2026-06-11'\n"
+		. "meeting_file_stem: 2026-06-11_zapusk-obrabotchika-vekh-vruchnuiu\n---\n\n"
+		. "# Executive Summary: Запуск обработчика вех вручную (Чт, 11 июня 2026)\n\n"
+		. "## Executive brief\n\nРешили передать задачу.\n";
+
 	private const YAML = "---\ndate: 2026-07-20\n"
 		. "started_at: 2026-07-20T14:00:23Z\n"
 		. "finished_at: 2026-07-20T14:40:23Z\n"
@@ -508,12 +514,75 @@ class FileArchiveTest extends TestCase {
 	}
 
 	public function testTheOtherAnalysisFilesAreNotCalls(): void {
+		// Never shared in practice, but a folder shared by hand would bring them
+		// along, and only two of the dozen stand for a call.
 		$archive = $this->archive([
 			'04_Meeting_Dynamics.md' => self::SUMMARY,
-			'01_Executive_Summary.md' => self::SUMMARY,
+			'05_Speaker_aleksandr-limonov.md' => self::SUMMARY,
+			'09_Enriched_Transcript.md' => self::ANALYSIS,
+		], index: [
+			'04_Meeting_Dynamics.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'05_Speaker_aleksandr-limonov.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'09_Enriched_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
 		]);
 
-		$this->assertSame([], $archive->list('alice')['meetings'],
-			'only the transcript stands for a call in the list');
+		$this->assertSame([], $archive->list('alice')['meetings']);
+	}
+
+	public function testASummaryAloneStandsForTheCall(): void {
+		// The months before the service shared the transcript: a participant
+		// holds the summary and nothing else.
+		$archive = $this->archive(
+			['01_Executive_Summary.md' => self::SUMMARY_ALONE],
+			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-06-11', '002')],
+		);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertSame('Запуск обработчика вех вручную', $meetings[0]['room_name'],
+			'the name is in the heading; the date in it is not part of it');
+		$this->assertFalse($meetings[0]['has_transcript']);
+		$this->assertFalse($meetings[0]['has_time'],
+			'the summary states the day only — an hour would be invented');
+		$this->assertSame(strtotime('2026-06-11'), $meetings[0]['call_start_ts']);
+	}
+
+	public function testSuchACallOpensItsSummaryAndHasNoTranscript(): void {
+		$archive = $this->archive(
+			['01_Executive_Summary.md' => self::SUMMARY_ALONE],
+			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-06-11', '002')],
+		);
+		$id = $archive->list('alice')['meetings'][0]['session_id'];
+
+		$this->assertStringContainsString('Решили передать задачу',
+			$archive->summary('alice', $id));
+		$this->assertSame('', $archive->transcript('alice', $id),
+			'returning the summary again would read as a transcript');
+	}
+
+	public function testASummaryIsNotListedTwiceWhenItsTranscriptIsThere(): void {
+		$archive = $this->archive([
+			'10_Original_Transcript.md' => self::ANALYSIS,
+			'01_Executive_Summary.md' => self::SUMMARY,
+		], index: [
+			'10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+			'01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004'),
+		]);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings);
+		$this->assertTrue($meetings[0]['has_transcript']);
+	}
+
+	public function testSearchReachesACallKnownOnlyByItsSummary(): void {
+		$archive = $this->archive(
+			['01_Executive_Summary.md' => self::SUMMARY_ALONE],
+			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-06-11', '002')],
+		);
+
+		$this->assertCount(1, $archive->list('alice', 50, 0, 'обработчика')['meetings']);
+		$this->assertSame([], $archive->list('alice', 50, 0, 'Superset')['meetings']);
 	}
 }

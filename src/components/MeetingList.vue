@@ -344,6 +344,13 @@ export default {
 			const started = new Date(meeting.call_start_ts * 1000)
 			const today = new Date()
 			const sameDay = started.toDateString() === today.toDateString()
+			// Calls known only by their summary have no clock time. Formatting
+			// the timestamp anyway prints "00:00" and reads as a midnight call.
+			if (meeting.has_time === false) {
+				return sameDay
+					? t('done_transcription', 'Today')
+					: started.toLocaleDateString()
+			}
 			const time = started.toLocaleTimeString([], {
 				hour: '2-digit',
 				minute: '2-digit',

@@ -153,7 +153,8 @@ class FileArchive {
 		foreach (array_slice($candidates, $offset) as $entry) {
 			$scanned++;
 			$file = $this->resolve($userId, $entry);
-			$meta = $file === null ? null : $this->transcriptMetadata($file);
+			$meta = $file === null ? null
+				: $this->transcriptMetadata($file, isset($entry['summary_only']));
 			if ($meta !== null) {
 				$meetings[] = $meta;
 				if (count($meetings) >= $limit) {
@@ -187,6 +188,12 @@ class FileArchive {
 	public function summary(string $userId, string $sessionId): string {
 		$candidates = $this->candidates($userId);
 		$entry = $candidates[(int)$sessionId] ?? null;
+
+		// A call whose transcript was never shared: the summary is the call.
+		if ($entry !== null && str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)) {
+			$file = $this->resolve($userId, $entry);
+			return $file === null ? '' : $this->contents($file);
+		}
 
 		// Analyser output: the summary is the file that sits in the same meeting
 		// folder. The folder is known from the file index, not from the mounted
@@ -235,7 +242,14 @@ class FileArchive {
 	 * @throws BackendException
 	 */
 	public function transcript(string $userId, string $sessionId): string {
-		return $this->contents($this->fileFor($userId, $sessionId));
+		$file = $this->fileFor($userId, $sessionId);
+
+		// A summary standing in for a call has no transcript behind it — and
+		// returning the summary again here would read as one.
+		if (str_starts_with($file->getName(), self::ANALYSIS_SUMMARY)) {
+			return '';
+		}
+		return $this->contents($file);
 	}
 
 	/**
@@ -565,10 +579,30 @@ class FileArchive {
 	 * @return array<int, array{name: string, node: ?File, share: ?IShare}>
 	 */
 	private function transcriptCandidates(string $userId): array {
-		$transcripts = array_filter(
-			$this->candidates($userId),
-			fn (array $e) => $this->looksLikeTranscript($e['name']),
-		);
+		$candidates = $this->candidates($userId);
+
+		// Which meeting folders have their transcript shared. For the months
+		// before the service began sharing it, none do — and those calls are in
+		// the archive as their summary alone rather than not at all.
+		$transcribed = [];
+		foreach ($candidates as $entry) {
+			if (str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)
+				&& isset($entry['folder'])) {
+				$transcribed[$entry['folder']] = true;
+			}
+		}
+
+		$transcripts = [];
+		foreach ($candidates as $id => $entry) {
+			if ($this->looksLikeTranscript($entry['name'])) {
+				$transcripts[$id] = $entry;
+			} elseif (str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)
+				&& isset($entry['folder'])
+				&& !isset($transcribed[$entry['folder']])) {
+				$entry['summary_only'] = true;
+				$transcripts[$id] = $entry;
+			}
+		}
 
 		// The sort key begins with the date — the filename for the older files,
 		// the meeting folder for the analysed ones — so sorting it in reverse is
@@ -634,18 +668,20 @@ class FileArchive {
 	 *
 	 * @return array<string, mixed>|null null when this is not a transcript
 	 */
-	private function transcriptMetadata(File $file): ?array {
+	private function transcriptMetadata(File $file, bool $summaryOnly = false): ?array {
 		$head = $this->head($file);
 		if ($head === null) {
 			return null;
 		}
 		$head = ltrim($head);
 
-		$meta = str_starts_with($head, '---')
-			? $this->fromYaml($head)
-			: (str_starts_with($head, self::HEADER_LEGACY)
-				? $this->fromLegacyHeader($head)
-				: null);
+		$meta = $summaryOnly
+			? $this->fromSummary($head)
+			: (str_starts_with($head, '---')
+				? $this->fromYaml($head)
+				: (str_starts_with($head, self::HEADER_LEGACY)
+					? $this->fromLegacyHeader($head)
+					: null));
 
 		if ($meta === null) {
 			return null;
@@ -659,7 +695,41 @@ class FileArchive {
 		return $meta + [
 			'session_id' => $this->sessionId($file),
 			'room_name' => $name,
-			'has_transcript' => true,
+			'has_transcript' => !$summaryOnly,
+			'has_time' => true,
+		];
+	}
+
+	/**
+	 * A call known only by its summary — the months before the service began
+	 * sharing the transcript beside it.
+	 *
+	 * The summary's header states the day and nothing else, so the clock time
+	 * and the participants are simply not known here; `has_time` says so, and
+	 * the list shows the day without inventing an hour. The meeting's name is
+	 * in the heading the analyser writes: "# Executive Summary: <name> (Вт, 21
+	 * июля 2026)".
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	private function fromSummary(string $head): ?array {
+		if (preg_match('/^meeting_date:\s*\'?(\d{4}-\d{2}-\d{2})/mu', $head, $m) !== 1) {
+			return null;
+		}
+
+		$name = '';
+		if (preg_match('/^#\s*Executive Summary:\s*(.+)$/mu', $head, $h) === 1) {
+			// The heading ends with the date in words, which the list already
+			// shows above the call.
+			$name = trim(preg_replace('/\s*\([^()]*\)\s*$/u', '', $h[1]));
+		}
+
+		return [
+			'call_start_ts' => strtotime($m[1]) ?: 0,
+			'call_end_ts' => 0,
+			'has_time' => false,
+			'participants' => [],
+			'meeting_name' => $name,
 		];
 	}
 
@@ -852,7 +922,7 @@ class FileArchive {
 		if ($head === null) {
 			return '';
 		}
-		$meta = $this->fromYaml($head);
+		$meta = $this->fromYaml($head) ?? $this->fromSummary(ltrim($head));
 		if ($meta === null) {
 			return '';
 		}
