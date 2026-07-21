@@ -16,11 +16,11 @@
 		<div class="meeting-list__filters">
 			<NcTextField
 				class="meeting-list__search"
-				v-model:value="query"
+				v-model="query"
 				:label="t('done_transcription', 'Search')"
 				trailing-button-icon="close"
 				:show-trailing-button="query !== ''"
-				@update:value="onFilterChange"
+				@update:model-value="onFilterChange"
 				@trailing-button-click="clearQuery">
 				<MagnifyIcon :size="18" />
 			</NcTextField>
