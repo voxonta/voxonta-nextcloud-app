@@ -48,9 +48,15 @@ class TranslationsTest extends TestCase {
 	/** @return string[] strings passed through the app's translation helpers */
 	private function serverStrings(): array {
 		$found = [];
-		foreach ($this->files($this->root() . '/lib', ['php']) as $file) {
+		// Templates as well as lib/: a settings page renders its text there, and
+		// a scanner that misses it reports every one of those strings as dead.
+		$files = array_merge(
+			$this->files($this->root() . '/lib', ['php']),
+			$this->files($this->root() . '/templates', ['php']),
+		);
+		foreach ($files as $file) {
 			preg_match_all(
-				"/(?:\\\$this->l|\\\$this->l10n->t)\(\s*'((?:[^'\\\\]|\\\\.)*)'/",
+				"/(?:\\\$this->l|\\\$this->l10n->t|\\\$l->t)\(\s*'((?:[^'\\\\]|\\\\.)*)'/",
 				file_get_contents($file), $matches);
 			foreach ($matches[1] as $string) {
 				$found[] = stripslashes($string);
