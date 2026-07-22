@@ -7,7 +7,7 @@ namespace OCA\DoneTranscription\Settings;
 use OCA\DoneTranscription\AppInfo\Application;
 use OCA\DoneTranscription\Service\ServiceConfig;
 use OCP\AppFramework\Http\TemplateResponse;
-use OCP\AppFramework\Services\IInitialState;
+use OCP\IL10N;
 use OCP\Settings\ISettings;
 
 /**
@@ -24,13 +24,15 @@ use OCP\Settings\ISettings;
 class ServiceStatus implements ISettings {
 	public function __construct(
 		private ServiceConfig $config,
-		private IInitialState $initialState,
+		private IL10N $l10n,
 	) {
 	}
 
 	public function getForm(): TemplateResponse {
-		$this->initialState->provideInitialState('serviceStatus', $this->config->status());
-		return new TemplateResponse(Application::APP_ID, 'settings-status');
+		return new TemplateResponse(Application::APP_ID, 'settings-status', [
+			'status' => $this->config->status(),
+			'l10n' => $this->l10n,
+		]);
 	}
 
 	public function getSection(): string {
