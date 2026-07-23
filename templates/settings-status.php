@@ -14,7 +14,11 @@ declare(strict_types=1);
  */
 
 $status = $_['status'];
+$bot = $_['bot'];
 $l = $_['l10n'];
+
+\OCP\Util::addScript(\OCA\DoneTranscription\AppInfo\Application::APP_ID,
+	\OCA\DoneTranscription\AppInfo\Application::APP_ID . '-settings');
 
 $state = !$status['configured'] ? 'idle' : ($status['connected'] ? 'ok' : 'warn');
 
@@ -52,6 +56,50 @@ if ($status['last_seen'] > 0) {
 	<?php if ($detail !== '') { ?>
 		<p class="done-transcription-status__detail"><?php p($detail); ?></p>
 	<?php } ?>
+
+	<div id="done_transcription_bot" class="done-transcription-bot">
+		<h3><?php p($l->t('Capture account')); ?></h3>
+		<p class="done-transcription-status__detail">
+			<?php p($l->t('The account the transcription service signs in to Nextcloud as, to join calls and write transcripts back. The service fetches its password itself — you do not enter it there.')); ?>
+		</p>
+
+		<?php if ($bot['user'] !== '') { ?>
+			<p>
+				<?php p($l->t('In use: {user}', ['user' => $bot['user']])); ?>
+				<?php if (!$bot['managed']) { p('· ' . $l->t('created by you')); } ?>
+				<?php if ($bot['managed'] && !$bot['exists']) { p('· ' . $l->t('the account is gone — recreate it')); } ?>
+			</p>
+		<?php } ?>
+
+		<p class="done-transcription-bot__actions">
+			<button type="button" data-action="provision" class="primary">
+				<?php p($bot['user'] === '' || $bot['managed']
+					? $l->t('Create the account')
+					: $l->t('Switch to an app-managed account')); ?>
+			</button>
+			<?php if ($bot['managed'] && $bot['exists']) { ?>
+				<button type="button" data-action="regenerate">
+					<?php p($l->t('New password')); ?>
+				</button>
+			<?php } ?>
+		</p>
+
+		<details class="done-transcription-bot__manual">
+			<summary><?php p($l->t('Use an account I made myself')); ?></summary>
+			<p class="done-transcription-status__detail">
+				<?php p($l->t('Create a user in Nextcloud, generate an app password for it in its security settings, and enter both here.')); ?>
+			</p>
+			<p>
+				<input type="text" data-field="user"
+					placeholder="<?php p($l->t('Account name')); ?>">
+				<input type="password" data-field="password"
+					placeholder="<?php p($l->t('App password')); ?>">
+				<button type="button" data-action="existing"><?php p($l->t('Save')); ?></button>
+			</p>
+		</details>
+
+		<div data-role="result" class="done-transcription-bot__result"></div>
+	</div>
 </div>
 
 <style>
@@ -78,5 +126,37 @@ if ($status['last_seen'] > 0) {
 	.done-transcription-status__detail {
 		color: var(--color-text-maxcontrast);
 		margin-block-start: 4px;
+	}
+
+	.done-transcription-bot {
+		margin-block-start: 20px;
+	}
+
+	.done-transcription-bot__actions {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.done-transcription-bot__manual {
+		margin-block-start: 12px;
+	}
+
+	.done-transcription-bot__manual input {
+		margin-inline-end: 8px;
+	}
+
+	.done-transcription-bot__result {
+		margin-block-start: 12px;
+	}
+
+	.done-transcription-bot__password {
+		display: inline-block;
+		margin-block-start: 4px;
+		padding: 4px 8px;
+		background: var(--color-background-dark);
+		border-radius: var(--border-radius);
+		user-select: all;
+		word-break: break-all;
 	}
 </style>

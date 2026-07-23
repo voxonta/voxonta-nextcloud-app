@@ -10,6 +10,7 @@ export default createAppConfig(
 	// settings block is static text and needs no bundle of its own.
 	{
 		main: 'src/main.js',
+		settings: 'src/settings.js',
 	},
 	{
 		// Styles ride inside the JS bundle, so the page needs only addScript —

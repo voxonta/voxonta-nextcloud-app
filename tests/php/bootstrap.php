@@ -19,3 +19,12 @@ require_once __DIR__ . '/../../vendor/autoload.php';
 if (!interface_exists('OC\Hooks\Emitter')) {
 	eval('namespace OC\Hooks; interface Emitter { public function listen($scope, $method, callable $callback); public function removeListener($scope = null, $method = null, ?callable $callback = null); }');
 }
+
+/**
+ * The private token provider, for the same reason as Emitter above: minting an
+ * app password is generateToken(), which lives on OC\Authentication\Token\IProvider
+ * and not on the OCP interface, so it is absent from the published stubs.
+ */
+if (!interface_exists('OC\Authentication\Token\IProvider')) {
+	eval('namespace OC\Authentication\Token; interface IProvider { public function generateToken(string $token, string $uid, string $loginName, ?string $password, string $name, int $type = 0, int $remember = 0, ?array $scope = null): \OCP\Authentication\Token\IToken; public function invalidateTokensOfUser(string $uid, ?string $clientName): void; }');
+}

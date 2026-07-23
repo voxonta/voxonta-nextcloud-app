@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Settings;
 
 use OCA\DoneTranscription\AppInfo\Application;
+use OCA\DoneTranscription\Service\BotAccount;
 use OCA\DoneTranscription\Service\ServiceConfig;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IL10N;
@@ -24,6 +25,7 @@ use OCP\Settings\ISettings;
 class ServiceStatus implements ISettings {
 	public function __construct(
 		private ServiceConfig $config,
+		private BotAccount $botAccount,
 		private IL10N $l10n,
 	) {
 	}
@@ -31,6 +33,7 @@ class ServiceStatus implements ISettings {
 	public function getForm(): TemplateResponse {
 		return new TemplateResponse(Application::APP_ID, 'settings-status', [
 			'status' => $this->config->status(),
+			'bot' => $this->botAccount->status(),
 			'l10n' => $this->l10n,
 		]);
 	}

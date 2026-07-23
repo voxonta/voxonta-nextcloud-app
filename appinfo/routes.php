@@ -22,5 +22,10 @@ return [
 		['name' => 'service#config', 'url' => '/api/v1/service/config', 'verb' => 'GET'],
 		['name' => 'service#calls', 'url' => '/api/v1/service/calls', 'verb' => 'GET'],
 		['name' => 'service#heartbeat', 'url' => '/api/v1/service/heartbeat', 'verb' => 'POST'],
+
+		// Administrator setting up the bot account, from the settings page.
+		['name' => 'botAccount#provision', 'url' => '/api/v1/bot/provision', 'verb' => 'POST'],
+		['name' => 'botAccount#useExisting', 'url' => '/api/v1/bot/existing', 'verb' => 'POST'],
+		['name' => 'botAccount#regenerate', 'url' => '/api/v1/bot/regenerate', 'verb' => 'POST'],
 	],
 ];

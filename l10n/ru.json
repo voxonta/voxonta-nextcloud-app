@@ -60,7 +60,24 @@
         "The service has stopped reporting in.": "Сервис перестал выходить на связь.",
         "The service has never reported in. Check that it holds the same key.": "Сервис ни разу не выходил на связь. Проверьте, что у него тот же ключ.",
         "Last report: {when}": "Последний отчёт: {when}",
-        "version {version}": "версия {version}"
+        "version {version}": "версия {version}",
+        "Enter the account name and its app password.": "Введите имя учётной записи и её пароль приложения.",
+        "Saved. Reload to see the connection state.": "Сохранено. Обновите страницу, чтобы увидеть состояние связи.",
+        "App password — copy it now, it is not shown again:": "Пароль приложения — скопируйте сейчас, повторно он не показывается:",
+        "Could not set up the account: {reason}": "Не удалось настроить учётную запись: {reason}",
+        "Capture account": "Учётная запись перехватчика",
+        "The account the transcription service signs in to Nextcloud as, to join calls and write transcripts back. The service fetches its password itself — you do not enter it there.": "Учётная запись, под которой сервис транскрибации входит в Nextcloud, чтобы подключаться к звонкам и записывать транскрипты. Пароль сервис забирает сам — вручную на его стороне вводить не нужно.",
+        "In use: {user}": "Используется: {user}",
+        "created by you": "создана вами",
+        "the account is gone — recreate it": "учётная запись удалена — создайте заново",
+        "Create the account": "Создать учётную запись",
+        "Switch to an app-managed account": "Перейти на учётную запись под управлением приложения",
+        "New password": "Новый пароль",
+        "Use an account I made myself": "Использовать учётную запись, созданную вручную",
+        "Create a user in Nextcloud, generate an app password for it in its security settings, and enter both here.": "Создайте пользователя в Nextcloud, сгенерируйте для него пароль приложения в настройках безопасности и введите оба значения здесь.",
+        "Account name": "Имя учётной записи",
+        "App password": "Пароль приложения",
+        "Save": "Сохранить"
     },
     "pluralForm": "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);"
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\DoneTranscription\Tests;
 
+use OCA\DoneTranscription\Service\BotAccount;
 use OCA\DoneTranscription\Service\ServiceConfig;
 use OCA\DoneTranscription\Settings\AdminSettings;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -19,6 +20,8 @@ use PHPUnit\Framework\TestCase;
 class ServiceConfigTest extends TestCase {
 	/** @var array<string, mixed> */
 	private array $stored = [];
+	/** @var array{user: string, password: string}|null */
+	private ?array $botCredentials = null;
 
 	private function config(int $now = 1_000_000): ServiceConfig {
 		$appConfig = $this->createMock(IAppConfig::class);
@@ -45,7 +48,11 @@ class ServiceConfigTest extends TestCase {
 		$time = $this->createMock(ITimeFactory::class);
 		$time->method('getTime')->willReturn($now);
 
-		return new ServiceConfig($appConfig, $time);
+		$bot = $this->createMock(BotAccount::class);
+		$bot->method('credentials')->willReturnCallback(
+			fn () => $this->botCredentials);
+
+		return new ServiceConfig($appConfig, $time, $bot);
 	}
 
 	// ── the secret ─────────────────────────────────────────────────────────
@@ -95,6 +102,20 @@ class ServiceConfigTest extends TestCase {
 		$this->assertSame([], array_filter(array_keys($settings),
 			static fn (string $k) => str_contains($k, 'retention')
 				|| str_contains($k, 'delete')));
+	}
+
+	public function testTheBotCredentialsArePassedToTheService(): void {
+		$this->botCredentials = ['user' => 'done-transcription-bot', 'password' => 'app-pw'];
+
+		$settings = $this->config()->forService();
+
+		$this->assertSame(['user' => 'done-transcription-bot', 'password' => 'app-pw'],
+			$settings['nextcloud']);
+	}
+
+	public function testWithoutABotAccountTheServiceIsToldThereIsNone(): void {
+		$this->assertNull($this->config()->forService()['nextcloud'],
+			'null, not an empty string — the service must not try to sign in');
 	}
 
 	public function testAnUnsetInstanceGetsTheDefaults(): void {

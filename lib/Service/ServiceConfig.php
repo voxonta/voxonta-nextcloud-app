@@ -6,6 +6,7 @@ namespace OCA\DoneTranscription\Service;
 
 use OCA\DoneTranscription\AppInfo\Application;
 use OCA\DoneTranscription\Settings\AdminSettings;
+use OCA\DoneTranscription\Service\BotAccount;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IAppConfig;
 
@@ -41,6 +42,7 @@ class ServiceConfig {
 	public function __construct(
 		private IAppConfig $appConfig,
 		private ITimeFactory $time,
+		private BotAccount $botAccount,
 	) {
 	}
 
@@ -66,6 +68,11 @@ class ServiceConfig {
 	 * The token itself is never in here: the service already has it, and a
 	 * response that echoes a secret ends up in logs.
 	 *
+	 * The Nextcloud credentials the service signs in with are in here too — the
+	 * whole point is that it fetches them rather than being handed them by a
+	 * person. They are what the shared secret protects; without a bot account set
+	 * up, the key is absent and the service knows it has nothing to sign in as.
+	 *
 	 * Nothing here can order a deletion, deliberately. A retention period was
 	 * drafted and taken out: these files are the only copy of what was said in
 	 * a call, and a wrong number in a settings form is not an acceptable way to
@@ -75,6 +82,7 @@ class ServiceConfig {
 	 */
 	public function forService(): array {
 		return [
+			'nextcloud' => $this->botAccount->credentials(),
 			'enabled' => $this->appConfig->getValueBool(
 				Application::APP_ID, AdminSettings::KEY_ENABLED, true),
 			'publish_to_chat' => $this->appConfig->getValueBool(
