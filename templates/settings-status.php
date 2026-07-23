@@ -34,10 +34,10 @@ if (!$status['configured']) {
 
 $detail = '';
 if ($status['last_seen'] > 0) {
-	$parts = [$l->t('Last report: {when}',
-		['when' => date('d.m.Y H:i', $status['last_seen'])])];
+	$parts = [$l->t('Last report: %s',
+		[date('d.m.Y H:i', $status['last_seen'])])];
 	if ($status['version'] !== '') {
-		$parts[] = $l->t('version {version}', ['version' => $status['version']]);
+		$parts[] = $l->t('version %s', [$status['version']]);
 	}
 	if ($status['note'] !== '') {
 		$parts[] = $status['note'];
@@ -65,7 +65,7 @@ if ($status['last_seen'] > 0) {
 
 		<?php if ($bot['user'] !== '') { ?>
 			<p>
-				<?php p($l->t('In use: {user}', ['user' => $bot['user']])); ?>
+				<?php p($l->t('In use: %s', [$bot['user']])); ?>
 				<?php if (!$bot['managed']) { p('· ' . $l->t('created by you')); } ?>
 				<?php if ($bot['managed'] && !$bot['exists']) { p('· ' . $l->t('the account is gone — recreate it')); } ?>
 			</p>
