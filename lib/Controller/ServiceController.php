@@ -6,6 +6,7 @@ namespace OCA\DoneTranscription\Controller;
 
 use OCA\DoneTranscription\Service\ActiveCalls;
 use OCA\DoneTranscription\Service\ServiceConfig;
+use OCA\DoneTranscription\Service\TalkParticipants;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
@@ -29,6 +30,7 @@ class ServiceController extends Controller {
 		IRequest $request,
 		private ServiceConfig $config,
 		private ActiveCalls $calls,
+		private TalkParticipants $participants,
 		private LoggerInterface $logger,
 	) {
 		parent::__construct($appName, $request);
@@ -59,7 +61,16 @@ class ServiceController extends Controller {
 		if (!$this->authorised()) {
 			return $this->refuse();
 		}
-		return new JSONResponse(['calls' => $this->calls->current()]);
+		// The live participant count rides along so the capture service can hold
+		// a one-to-one call until the second person answers without a second
+		// request. Null when it cannot be told (no Talk, room gone) — the
+		// service reads that as "do not block".
+		$calls = $this->calls->current();
+		foreach ($calls as &$call) {
+			$call['active_participants'] = $this->participants->countInCall($call['token']);
+		}
+		unset($call);
+		return new JSONResponse(['calls' => $calls]);
 	}
 
 	/**
