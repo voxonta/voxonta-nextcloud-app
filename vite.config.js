@@ -5,12 +5,11 @@
 import { createAppConfig } from '@nextcloud/vite-config'
 
 export default createAppConfig(
-	// One entry, deliberately. A second one made Vite split the shared CSS into
-	// a chunk that the page never loaded, and the app rendered unstyled — the
-	// settings block is static text and needs no bundle of its own.
+	// One entry, always. A second one makes Vite split the shared CSS into a
+	// chunk the page never loads, and the app renders unstyled. The settings
+	// page loads this same bundle; main.js wires whichever elements it finds.
 	{
 		main: 'src/main.js',
-		settings: 'src/settings.js',
 	},
 	{
 		// Styles ride inside the JS bundle, so the page needs only addScript —

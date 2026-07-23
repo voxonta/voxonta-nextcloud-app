@@ -18,7 +18,7 @@ $bot = $_['bot'];
 $l = $_['l10n'];
 
 \OCP\Util::addScript(\OCA\DoneTranscription\AppInfo\Application::APP_ID,
-	\OCA\DoneTranscription\AppInfo\Application::APP_ID . '-settings');
+	\OCA\DoneTranscription\AppInfo\Application::APP_ID . '-main');
 
 $state = !$status['configured'] ? 'idle' : ($status['connected'] ? 'ok' : 'warn');
 

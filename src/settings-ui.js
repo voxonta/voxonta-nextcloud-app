@@ -15,9 +15,16 @@ import { getRequestToken } from '@nextcloud/auth'
 import { confirmPassword } from '@nextcloud/password-confirmation'
 import { translate as t } from '@nextcloud/l10n'
 
-const root = document.getElementById('done_transcription_bot')
-if (root) {
-	setup(root)
+/**
+ * Wire the bot-account buttons, if this page has them. Called from main.js so
+ * there is one bundle, loaded on both the archive and the settings page — a
+ * second Vite entry split the app's CSS into a chunk the page never loaded.
+ */
+export function wireBotAccount() {
+	const el = document.getElementById('done_transcription_bot')
+	if (el) {
+		setup(el)
+	}
 }
 
 function setup(el) {

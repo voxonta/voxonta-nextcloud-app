@@ -7,12 +7,21 @@
 import { createApp } from 'vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import App from './App.vue'
+import { wireBotAccount } from './settings-ui.js'
 
-const app = createApp(App)
+// One bundle for both pages. The archive mounts where its element is; the
+// settings page has no such element, only the bot-account block, and wiring
+// that here keeps everything in a single entry — two entries split the app's
+// stylesheet into a chunk the page never loaded, and the archive rendered
+// unstyled.
+const mount = document.getElementById('done_transcription')
+if (mount) {
+	const app = createApp(App)
+	// t/n as global properties, so every component can call them in its template
+	// the way Nextcloud components expect.
+	app.config.globalProperties.t = t
+	app.config.globalProperties.n = n
+	app.mount(mount)
+}
 
-// t/n as global properties, so every component can call them in its template
-// the way Nextcloud components expect.
-app.config.globalProperties.t = t
-app.config.globalProperties.n = n
-
-app.mount('#done_transcription')
+wireBotAccount()
