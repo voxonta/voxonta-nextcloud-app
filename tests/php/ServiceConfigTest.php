@@ -113,6 +113,26 @@ class ServiceConfigTest extends TestCase {
 			$settings['nextcloud']);
 	}
 
+	public function testSignalingIsReadFromTalksOwnConfig(): void {
+		$this->stored['signaling_servers'] = json_encode([
+			'servers' => [['server' => 'https://signal.example.com', 'verify' => true]],
+			'secret' => 'hpb-secret',
+		]);
+
+		$signaling = $this->config()->forService()['signaling'];
+
+		// The raw https server and the secret, as Talk stores them; the capture
+		// side turns the URL into the wss form it dials.
+		$this->assertSame('https://signal.example.com', $signaling['url']);
+		$this->assertSame('hpb-secret', $signaling['secret']);
+	}
+
+	public function testNoTalkSignalingConfigIsNotAnError(): void {
+		// An instance without an external signaling server: null, and the
+		// administrator sets HPB by hand — not a crash.
+		$this->assertNull($this->config()->forService()['signaling']);
+	}
+
 	public function testWithoutABotAccountTheServiceIsToldThereIsNone(): void {
 		$this->assertNull($this->config()->forService()['nextcloud'],
 			'null, not an empty string — the service must not try to sign in');

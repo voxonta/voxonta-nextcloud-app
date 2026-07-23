@@ -83,6 +83,7 @@ class ServiceConfig {
 	public function forService(): array {
 		return [
 			'nextcloud' => $this->botAccount->credentials(),
+			'signaling' => $this->signaling(),
 			'enabled' => $this->appConfig->getValueBool(
 				Application::APP_ID, AdminSettings::KEY_ENABLED, true),
 			'publish_to_chat' => $this->appConfig->getValueBool(
@@ -134,6 +135,36 @@ class ServiceConfig {
 			'note' => $this->appConfig->getValueString(
 				Application::APP_ID, self::KEY_LAST_NOTE, ''),
 		];
+	}
+
+	/**
+	 * The High-Performance Backend the capture service connects to, read from
+	 * Talk's own configuration so a client install need not be told it.
+	 *
+	 * Talk stores the server and its secret together as JSON under the `spreed`
+	 * app: {"servers":[{"server":"https://…"}],"secret":"…"}. The raw
+	 * https server is returned; the capture side turns it into the wss URL it
+	 * dials. Null when Talk is not configured for an external signaling server —
+	 * then the administrator still sets HPB_URL/HPB_SECRET by hand.
+	 *
+	 * @return array{url: string, secret: string}|null
+	 */
+	private function signaling(): ?array {
+		$raw = $this->appConfig->getValueString('spreed', 'signaling_servers', '');
+		if ($raw === '') {
+			return null;
+		}
+		try {
+			$config = json_decode($raw, true, 8, JSON_THROW_ON_ERROR);
+		} catch (\JsonException) {
+			return null;
+		}
+		$server = $config['servers'][0]['server'] ?? '';
+		$secret = $config['secret'] ?? '';
+		if ($server === '' || $secret === '') {
+			return null;
+		}
+		return ['url' => (string)$server, 'secret' => (string)$secret];
 	}
 
 	/** @return string[] conversation tokens, empty meaning "every call" */
