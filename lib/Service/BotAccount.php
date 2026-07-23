@@ -97,9 +97,12 @@ class BotAccount {
 					\OCP\AppFramework\Http::STATUS_INTERNAL_SERVER_ERROR);
 			}
 			$user->setDisplayName('Транскрибация');
-			// No interactive login: the account is for the service, and one that
-			// can also be logged into is a second door to guard.
-			$user->setEnabled(false);
+			// Left enabled on purpose: an app password does not authenticate for a
+			// disabled account, so disabling it would break the very sign-in it
+			// exists for. Interactive login is shut off a different way — the login
+			// password is random and kept nowhere, so there is nothing to log in
+			// with; only the app password works, and that is revocable in one
+			// place.
 		}
 
 		$this->appConfig->setValueString(Application::APP_ID, self::KEY_USER, $uid);

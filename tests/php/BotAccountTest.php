@@ -50,7 +50,18 @@ class BotAccountTest extends TestCase {
 		$existing = $userExists ? $this->createMock(IUser::class) : null;
 		$users->method('get')->willReturn($existing);
 		$users->method('createUser')->willReturnCallback(
-			fn () => $this->createMock(IUser::class));
+			function () {
+				$user = $this->createMock(IUser::class);
+				// A disabled account cannot authenticate even with an app
+				// password, so disabling it would break the sign-in it exists
+				// for. If this is ever called with false, the account is dead.
+				$user->method('setEnabled')->willReturnCallback(
+					function (bool $enabled) {
+						$this->assertTrue($enabled,
+							'the bot account must stay enabled or its app password will not work');
+					});
+				return $user;
+			});
 
 		$random = $this->createMock(ISecureRandom::class);
 		$n = 0;

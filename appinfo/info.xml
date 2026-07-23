@@ -19,7 +19,7 @@ Nextcloud. It reads its settings from here — whether to transcribe, which
 conversations, how long to keep the results — using an access key the
 administrator sets in the admin settings and enters in the service as well.
     ]]></description>
-    <version>2.4.0</version>
+    <version>2.4.1</version>
     <licence>agpl</licence>
     <author>Done</author>
     <namespace>DoneTranscription</namespace>
