@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Listener;
 
 use OCA\DoneTranscription\AppInfo\Application;
+use OCA\DoneTranscription\Service\PendingMeetings;
 use OCA\DoneTranscription\Service\RecordingState;
+use OCA\DoneTranscription\Service\TelemostLauncher;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use OCP\IL10N;
@@ -27,6 +29,8 @@ class BotListener implements IEventListener {
 
 	public function __construct(
 		private RecordingState $recordingState,
+		private TelemostLauncher $telemost,
+		private PendingMeetings $pending,
 		private IL10N $l10n,
 		private LoggerInterface $logger,
 	) {
@@ -51,9 +55,57 @@ class BotListener implements IEventListener {
 		$text = trim(mb_strtolower($this->contentOf($message)));
 		if (in_array($text, self::STOP, true)) {
 			$this->setRecording($event, $message, false);
-		} elseif (in_array($text, self::START, true)) {
-			$this->setRecording($event, $message, true);
+			return;
 		}
+		if (in_array($text, self::START, true)) {
+			$this->setRecording($event, $message, true);
+			return;
+		}
+
+		// Not a command: someone may simply have shared a meeting they want
+		// transcribed. Read from the original text, not the lowercased copy —
+		// a link's path is case-sensitive.
+		$link = $this->telemost->linkIn($this->contentOf($message));
+		if ($link !== '') {
+			$this->launchTelemost($event, $message, $link);
+		}
+	}
+
+	/**
+	 * Send a bot to a shared meeting, and remember the meeting so its files are
+	 * collected when they are ready.
+	 *
+	 * The queue entry is what makes this more than a fire-and-forget: without
+	 * it the meeting would be transcribed and nobody would ever fetch the
+	 * result. The room the link was posted in becomes the meeting's room, so
+	 * the files are shared with the people who were talking about it.
+	 */
+	private function launchTelemost(\OCA\Talk\Events\BotInvokeEvent $event,
+		array $message, string $link): void {
+		if (!$this->telemost->configured()) {
+			return;  // no launcher set up — a shared link is just a link
+		}
+
+		$sessionId = $this->telemost->launch($link);
+		if ($sessionId === '') {
+			// Unreachable, refused, or at capacity. Saying so is better than a
+			// silence someone reads as "it is being recorded".
+			$event->addAnswer($this->l10n->t(
+				'Could not send a bot to that meeting. Please try again in a few minutes.'));
+			return;
+		}
+
+		$token = (string)($message['target']['id'] ?? '');
+		$this->pending->add([
+			'session_id' => $sessionId,
+			'token' => $token,
+			'name' => (string)($message['target']['name'] ?? 'Telemost'),
+			'type' => 2,
+		]);
+		$this->logger->info('sent a bot to a Telemost meeting [{session}]',
+			['session' => $sessionId]);
+		$event->addAnswer($this->l10n->t(
+			'A bot is joining that meeting. The transcript will appear here when it ends.'));
 	}
 
 	private function setRecording(\OCA\Talk\Events\BotInvokeEvent $event,

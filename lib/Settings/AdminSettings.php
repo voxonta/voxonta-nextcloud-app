@@ -36,6 +36,11 @@ class AdminSettings implements IDeclarativeSettingsForm {
 	// not chosen here.
 	public const KEY_GATEWAY_URL = 'gateway_url';
 	public const KEY_GATEWAY_TOKEN = 'gateway_token';
+	// Where a Telemost bot is asked for. Same service family as the gateway,
+	// different door: audio comes back through the gateway, this only sends
+	// the bot into the meeting.
+	public const KEY_TELEMOST_URL = 'telemost_url';
+	public const KEY_TELEMOST_TOKEN = 'telemost_token';
 
 	/** What the folders are called unless an administrator says otherwise. */
 	public const DEFAULT_ANALYSIS_FOLDER = 'Аналитика встреч';
