@@ -11,6 +11,7 @@ use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 use OCP\IAppConfig;
+use OCP\IURLGenerator;
 use OCP\Share\IManager;
 use OCP\Share\IShare;
 use Psr\Log\LoggerInterface;
@@ -42,6 +43,7 @@ class ArtifactWriter {
 		private IManager $shareManager,
 		private BotAccount $botAccount,
 		private IAppConfig $appConfig,
+		private IURLGenerator $urlGenerator,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -102,8 +104,41 @@ class ArtifactWriter {
 	}
 
 	private function shouldShare(string $kind, string $name): bool {
+		// An analysis set arrives named by its place in the set --
+		// "2026-08-02/001_the-meeting/10_Original_Transcript.md" -- so the
+		// by-name list has to be matched against the file, not the path.
 		return in_array($kind, self::SHARED, true)
-			|| in_array($name, self::SHARED_BY_NAME, true);
+			|| in_array(basename($name), self::SHARED_BY_NAME, true);
+	}
+
+	/**
+	 * An absolute link to an artifact that is already written, or null when it
+	 * is not there. What a file is stored as and what a person should be told it
+	 * is are different things; this lets the caller point at one by a name of
+	 * its choosing, without renaming anything in the archive.
+	 *
+	 * @param array<string, mixed> $meta name/kind from the gateway's listing
+	 */
+	public function linkTo(array $meta): ?string {
+		$credentials = $this->botAccount->credentials();
+		$name = $this->safeName((string)($meta['name'] ?? ''));
+		if ($credentials === null || $name === '') {
+			return null;
+		}
+		$relative = $this->folderFor((string)($meta['kind'] ?? '')) . '/' . $name;
+		try {
+			$node = $this->rootFolder->getUserFolder($credentials['user'])
+				->get($relative);
+		} catch (NotFoundException) {
+			return null;
+		}
+		return $this->urlGenerator->getAbsoluteURL('/f/' . $node->getId());
+	}
+
+	/** Whether results are meant to reach the room at all. */
+	public function publishesToChat(): bool {
+		return $this->appConfig->getValueBool(
+			Application::APP_ID, AdminSettings::KEY_PUBLISH_TO_CHAT, true);
 	}
 
 	/**

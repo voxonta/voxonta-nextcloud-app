@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\BackgroundJob;
 
 use OCA\DoneTranscription\Service\ArtifactWriter;
+use OCA\DoneTranscription\Service\ChatAnnouncer;
 use OCA\DoneTranscription\Service\GatewayClient;
 use OCA\DoneTranscription\Service\PendingMeetings;
 use OCA\DoneTranscription\Service\TalkParticipants;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
+use OCP\IL10N;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -38,7 +40,9 @@ class CollectArtifacts extends TimedJob {
 		private PendingMeetings $pending,
 		private GatewayClient $gateway,
 		private ArtifactWriter $writer,
+		private ChatAnnouncer $announcer,
 		private TalkParticipants $participants,
+		private IL10N $l10n,
 		private LoggerInterface $logger,
 	) {
 		parent::__construct($time);
@@ -109,9 +113,46 @@ class CollectArtifacts extends TimedJob {
 			if ($state['status'] === 'failed') {
 				$this->logger->warning('{session} finished badly: {detail}',
 					['session' => $sessionId, 'detail' => $state['detail']]);
+			} else {
+				// Once, here, rather than as each file lands: a room told three
+				// times over an hour is a room that mutes the bot.
+				$this->announce((string)($meeting['token'] ?? ''), $state['artifacts']);
 			}
 			$this->pending->done($sessionId);
 		}
+	}
+
+	/**
+	 * Tell the room, naming the files by what they are.
+	 *
+	 * Only the two a person actually opens. The rest of an analysis set is in
+	 * the folder for whoever wants it, and listing all thirteen would bury the
+	 * two that answer "what happened in that call".
+	 *
+	 * @param array<int, array<string, mixed>> $artifacts
+	 */
+	private function announce(string $token, array $artifacts): void {
+		if ($token === '' || !$this->writer->publishesToChat()) {
+			return;
+		}
+
+		$labels = [
+			'10_Original_Transcript.md' => $this->l10n->t('Transcript'),
+			'01_Executive_Summary.md' => $this->l10n->t('Summary'),
+		];
+		$links = [];
+		foreach ($artifacts as $artifact) {
+			$label = $labels[basename((string)($artifact['name'] ?? ''))] ?? null;
+			if ($label === null || isset($links[$label])) {
+				continue;
+			}
+			$url = $this->writer->linkTo($artifact);
+			if ($url !== null) {
+				$links[$label] = $url;
+			}
+		}
+
+		$this->announcer->announce($token, $links);
 	}
 
 	/**
