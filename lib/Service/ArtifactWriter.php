@@ -66,6 +66,17 @@ class ArtifactWriter {
 			return false;
 		}
 		$kind = (string)($meta['kind'] ?? '');
+
+		// Per-call numbers are not part of a meeting's files. They belong to a
+		// daily total that is appended to, not created once, and they feed our
+		// own reporting rather than anything a participant opens. Writing them
+		// as a file would put a stray dated JSON among the analysis, and only
+		// the day's first call would land — every later one would see the name
+		// taken and skip. Whoever owns that reporting keeps writing them.
+		if ($kind === 'stats') {
+			return true;  // "stop asking for this", not "written"
+		}
+
 		$relative = $this->folderFor($kind) . '/' . $name;
 
 		try {
