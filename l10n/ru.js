@@ -1,6 +1,8 @@
 OC.L10N.register(
     "done_transcription",
     {
+    "A bot is joining that meeting. The transcript will appear here when it ends.": "Бот подключается к встрече. Расшифровка появится здесь, когда она закончится.",
+    "Could not send a bot to that meeting. Please try again in a few minutes.": "Не удалось отправить бота на встречу. Попробуйте ещё раз через несколько минут.",
     "Meetings": "Встречи",
     "Try again": "Повторить",
     "No transcribed meetings yet.": "Расшифрованных встреч пока нет.",
