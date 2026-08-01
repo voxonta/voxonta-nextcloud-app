@@ -78,6 +78,8 @@ OC.L10N.register(
     "Save": "Сохранить",
     "Last report: %s": "Последний отчёт: %s",
     "In use: %s": "Используется: %s",
-    "version %s": "версия %s"
+    "version %s": "версия %s",
+    "A bot is joining that meeting. The transcript will appear here when it ends.": "Бот подключается к встрече. Расшифровка появится здесь, когда она закончится.",
+    "Could not send a bot to that meeting. Please try again in a few minutes.": "Не удалось отправить бота на встречу. Попробуйте ещё раз через несколько минут."
 },
     "nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);");
