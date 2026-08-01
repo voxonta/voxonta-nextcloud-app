@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\DoneTranscription\Listener;
 
 use OCA\DoneTranscription\Service\ActiveCalls;
+use OCA\DoneTranscription\Service\PendingMeetings;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use Psr\Log\LoggerInterface;
@@ -26,6 +27,7 @@ use Psr\Log\LoggerInterface;
 class CallListener implements IEventListener {
 	public function __construct(
 		private ActiveCalls $calls,
+		private PendingMeetings $pending,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -42,7 +44,12 @@ class CallListener implements IEventListener {
 			// may not have been written back yet.
 			$ended = str_contains($event::class, 'CallEnded');
 			if ($ended) {
-				$this->calls->ended($room->getToken());
+				$call = $this->calls->ended($room->getToken());
+				if ($call !== null) {
+					// Its audio is already with the gateway; from here on the
+					// only thing left is to collect what it produced.
+					$this->pending->add($call);
+				}
 				return;
 			}
 

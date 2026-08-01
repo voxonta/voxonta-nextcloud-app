@@ -31,6 +31,11 @@ class AdminSettings implements IDeclarativeSettingsForm {
 	public const KEY_ANALYSIS_FOLDER = 'analysis_folder';
 	public const KEY_TRANSCRIPTS_FOLDER = 'transcripts_folder';
 	public const KEY_MINUTES_FOLDER = 'minutes_folder';
+	// Where finished meetings are collected from, and the key that
+	// identifies this installation to it. Both are issued with the service,
+	// not chosen here.
+	public const KEY_GATEWAY_URL = 'gateway_url';
+	public const KEY_GATEWAY_TOKEN = 'gateway_token';
 
 	/** What the folders are called unless an administrator says otherwise. */
 	public const DEFAULT_ANALYSIS_FOLDER = 'Аналитика встреч';

@@ -60,19 +60,49 @@ class ActiveCalls {
 				'name' => $name,
 				'type' => $type,
 				'started_at' => $this->time->getTime(),
+				// The meeting's id, issued here because this is where a call's
+				// life begins. The capture service carries it to the gateway and
+				// we later collect the finished files by it, so all three sides
+				// name the same meeting the same way. Issued once: a repeat of
+				// the start event must not rename a call already in progress.
+				'session_id' => $this->newSessionId(),
 			];
 			$this->store($calls);
 			$this->logger->info('call started in {token}', ['token' => $token]);
 		}
 	}
 
-	public function ended(string $token): void {
+	/**
+	 * Drop a finished call and hand it back, so the caller can pass it on for
+	 * collection. Null when we never saw it start.
+	 *
+	 * @return array{token: string, name: string, type: int, started_at: int,
+	 *               session_id: string}|null
+	 */
+	public function ended(string $token): ?array {
 		$calls = $this->all();
-		if (isset($calls[$token])) {
-			unset($calls[$token]);
-			$this->store($calls);
-			$this->logger->info('call ended in {token}', ['token' => $token]);
+		if (!isset($calls[$token])) {
+			return null;
 		}
+		$call = $calls[$token];
+		unset($calls[$token]);
+		$this->store($calls);
+		$this->logger->info('call ended in {token}', ['token' => $token]);
+		return $call;
+	}
+
+	/**
+	 * A meeting id: random, unguessable, and ours to issue.
+	 *
+	 * Not derived from the room or the time — two calls in the same room must
+	 * never collide, and the id is what the gateway treats as the idempotency
+	 * key for the whole meeting.
+	 */
+	private function newSessionId(): string {
+		$b = random_bytes(16);
+		$b[6] = chr((ord($b[6]) & 0x0f) | 0x40);
+		$b[8] = chr((ord($b[8]) & 0x3f) | 0x80);
+		return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($b), 4));
 	}
 
 	/**

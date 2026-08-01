@@ -52,4 +52,41 @@ class TalkParticipants {
 			return null;
 		}
 	}
+
+	/**
+	 * The user ids of everyone in a room, for sharing a meeting's files with
+	 * them. Guests have no id and are skipped: there is nobody to share with.
+	 *
+	 * An empty list rather than null on failure — the caller writes the files
+	 * either way, and a share it could not work out is not worth losing them
+	 * over.
+	 *
+	 * @return array<int, string>
+	 */
+	public function userIds(string $token): array {
+		if (!class_exists('\OCA\Talk\Manager')
+			|| !class_exists('\OCA\Talk\Service\ParticipantService')) {
+			return [];
+		}
+		try {
+			$manager = Server::get(\OCA\Talk\Manager::class);
+			$participants = Server::get(\OCA\Talk\Service\ParticipantService::class);
+			$room = $manager->getRoomByToken($token);
+
+			$ids = [];
+			foreach ($participants->getParticipantsForRoom($room) as $participant) {
+				$uid = $participant->getAttendee()->getActorId();
+				$type = $participant->getAttendee()->getActorType();
+				if ($type === 'users' && $uid !== '') {
+					$ids[$uid] = true;
+				}
+			}
+			return array_keys($ids);
+		} catch (\Throwable $e) {
+			$this->logger->debug('could not list participants of {token}: {msg}', [
+				'token' => $token, 'msg' => $e->getMessage(),
+			]);
+			return [];
+		}
+	}
 }
