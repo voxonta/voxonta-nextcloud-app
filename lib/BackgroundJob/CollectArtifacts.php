@@ -1,0 +1,136 @@
+<?php
+
+declare(strict_types=1);
+
+namespace OCA\DoneTranscription\BackgroundJob;
+
+use OCA\DoneTranscription\Service\ArtifactWriter;
+use OCA\DoneTranscription\Service\GatewayClient;
+use OCA\DoneTranscription\Service\PendingMeetings;
+use OCA\DoneTranscription\Service\TalkParticipants;
+use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\BackgroundJob\TimedJob;
+use Psr\Log\LoggerInterface;
+
+/**
+ * Collect the files of meetings that have finished.
+ *
+ * The call ended some time ago and its audio went to the gateway; the transcript
+ * is usually ready within seconds of that, the analysis an hour or two later.
+ * This asks, takes what is there, and stops asking once nothing further will
+ * come.
+ *
+ * Polling rather than being pushed: the gateway would otherwise need to reach
+ * into a Nextcloud that is often behind NAT, and an installation that has to
+ * open a port is an installation nobody completes. Nextcloud's cron is the
+ * natural clock for that, and a few minutes of delay on something that took an
+ * hour to produce is not worth a webhook.
+ */
+class CollectArtifacts extends TimedJob {
+	/**
+	 * Meetings per run. Each is one listing plus the files not yet held, so a
+	 * handful keeps a cron tick short even when several calls end together.
+	 */
+	private const BATCH = 5;
+
+	public function __construct(
+		ITimeFactory $time,
+		private PendingMeetings $pending,
+		private GatewayClient $gateway,
+		private ArtifactWriter $writer,
+		private TalkParticipants $participants,
+		private LoggerInterface $logger,
+	) {
+		parent::__construct($time);
+		$this->setInterval(5 * 60);
+		// Nothing here is urgent: the files are already safe on the gateway,
+		// and this is about moving them, not about producing them.
+		$this->setTimeSensitivity(self::TIME_INSENSITIVE);
+	}
+
+	protected function run($argument): void {
+		if (!$this->gateway->configured()) {
+			return;  // no gateway set up yet — nothing to collect from
+		}
+
+		foreach (array_slice($this->pending->due(), 0, self::BATCH) as $meeting) {
+			try {
+				$this->collect($meeting);
+			} catch (\Throwable $e) {
+				// One meeting's trouble must not stop the others: a failure
+				// leaves it pending and the next tick tries again.
+				$this->logger->error('collecting {session} failed', [
+					'session' => $meeting['session_id'] ?? '?',
+					'exception' => $e,
+				]);
+			}
+		}
+	}
+
+	/** @param array<string, mixed> $meeting */
+	private function collect(array $meeting): void {
+		$sessionId = (string)$meeting['session_id'];
+		$state = $this->gateway->meeting($sessionId);
+		if ($state === null) {
+			return;  // unreachable or not known yet — ask again next tick
+		}
+
+		$held = $meeting['written'] ?? [];
+		$participants = $this->participantsOf((string)($meeting['token'] ?? ''));
+		$written = [];
+
+		foreach ($state['artifacts'] as $artifact) {
+			$sha = (string)($artifact['sha256'] ?? '');
+			if ($sha === '' || in_array($sha, $held, true)) {
+				continue;  // already ours
+			}
+			$content = $this->gateway->artifact($sessionId, $sha);
+			if ($content === null) {
+				continue;  // fetch failed or arrived corrupt — try next tick
+			}
+			if ($this->writer->write($artifact, $content, $participants)) {
+				$written[] = $sha;
+			}
+		}
+
+		if ($written !== []) {
+			// Recorded before acknowledging: if we crash between the two, the
+			// worst case is the gateway keeping files a while longer, not us
+			// writing them twice.
+			$this->pending->markWritten($sessionId, $written);
+			$this->gateway->ack($sessionId, $written);
+			$this->logger->info('collected {count} file(s) for {session}',
+				['count' => count($written), 'session' => $sessionId]);
+		}
+
+		if ($state['final']) {
+			// Terminal: everything that will exist, exists. A failed meeting is
+			// terminal too — retrying it would only ask the same question.
+			if ($state['status'] === 'failed') {
+				$this->logger->warning('{session} finished badly: {detail}',
+					['session' => $sessionId, 'detail' => $state['detail']]);
+			}
+			$this->pending->done($sessionId);
+		}
+	}
+
+	/**
+	 * Who to share with. An empty list is fine — the files are written either
+	 * way, and a share that could not be worked out is not worth losing them
+	 * over.
+	 *
+	 * @return array<int, string>
+	 */
+	private function participantsOf(string $token): array {
+		if ($token === '') {
+			return [];
+		}
+		try {
+			return $this->participants->userIds($token);
+		} catch (\Throwable $e) {
+			$this->logger->debug('could not list participants of {token}: {message}',
+				['token' => $token, 'message' => $e->getMessage()]);
+			return [];
+		}
+	}
+}

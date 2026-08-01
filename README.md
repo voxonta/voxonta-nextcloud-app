@@ -19,26 +19,57 @@ to do next.
 
 ## Requirements
 
-- **Nextcloud 32 or newer**
+- **Nextcloud 30 or newer.** Developed and tested against 33.
 - **Talk with a High Performance Backend (HPB).** Audio is captured through the
   signalling server, so a Talk installation without an HPB is not supported.
-- The HPB address and its internal secret, entered once when the app is
-  deployed.
+- **The transcription service**, reachable from Nextcloud. It does the recording
+  and the speech recognition; this app is what you and your users see.
+
+No Docker and no AppAPI are needed for the app itself.
 
 ## Install
 
-1. Install the app and register it with your Deploy Daemon.
-2. Fill in **Deploy Options**:
+1. Unpack the release archive into your Nextcloud `apps/` directory:
 
-   | Variable | Value |
-   |---|---|
-   | `DT_HPB_URL` | your signalling server, e.g. `wss://signal.example.com/spreed` |
-   | `DT_HPB_INTERNAL_SECRET` | the `internalsecret` from your HPB configuration |
+   ```bash
+   tar -xzf done_transcription-1.0.0.tar.gz -C /var/www/nextcloud/apps/
+   chown -R www-data:www-data /var/www/nextcloud/apps/done_transcription
+   ```
 
-3. Enable the app.
+2. Enable it:
 
-> These values are read at deploy time. Changing them later requires
-> reinstalling the app.
+   ```bash
+   occ app:enable done_transcription
+   ```
+
+   To try it with one team first, enable it for their group only — this hides
+   the app from everyone else:
+
+   ```bash
+   occ app:enable done_transcription --groups pilot-team
+   ```
+
+3. Register the chat bot, so people can stop a recording from the conversation:
+
+   ```bash
+   occ talk:bot:install "Done Transcription" \
+       "$(openssl rand -hex 32)" \
+       "nextcloudapp://done_transcription" \
+       "Transcribes calls and accepts the recording commands" \
+       --feature event --feature response
+   ```
+
+   The secret is unused for an in-app bot — Talk requires the argument — but it
+   should still be random.
+
+4. Open **Administration settings → Artificial intelligence → Done
+   Transcription** and enter the address and token of your transcription
+   service.
+
+## Upgrade
+
+Replace the directory with the new release and run `occ upgrade`. Settings and
+transcripts are unaffected.
 
 ## Using it
 
@@ -75,46 +106,47 @@ answers, so a ringing call is never recorded.
 
 ## How it works
 
-The app registers with Nextcloud through the AppAPI and joins each call as an
-internal client of the signalling server, receiving one audio stream per
-speaker. The streams are sent to the transcription engine; when the call ends,
-the finished call is handed to the backend, which produces the summary and
-publishes the result.
+The app is the Nextcloud side of the system, and only that: the meeting list,
+the transcripts, the settings and the chat commands.
 
-Speech recognition and analysis run in a separate backend service. This app is
-the Nextcloud-side adapter: it captures the audio and surfaces the results.
+Recording and speech recognition happen in a separate transcription service.
+It joins each call as an internal client of the signalling server and receives
+one audio stream per speaker — that is why the transcript can say who said
+what, and why a High Performance Backend is required. When a call ends, the
+service produces the summary and stores the result; this app reads it back.
+
+The service token stays on the server. Every archive request passes through
+this app, which scopes the answer to the person asking: the service isolates by
+tenant, not by user, and only Nextcloud knows who is on the other end of the
+request.
 
 ## Development
 
 ```bash
-pip install -r requirements.txt
-python3 -m uvicorn ex_app.lib.main:APP --port 9031
+composer install
+npm install
+
+npm run watch      # rebuild the frontend on change (Vite)
+composer test      # all tests; no Nextcloud instance needed
 ```
 
-Register the app against a running Nextcloud:
+Frontend: Vue 3 + Vite + @nextcloud/vue 9, the current Nextcloud 33 stack.
 
-```bash
-occ app_api:daemon:register manual_dev "Manual (dev)" \
-    manual-install http localhost https://cloud.example.com
-
-occ app_api:app:register done_transcription manual_dev --json-info \
-  '{"id":"done_transcription","name":"Done Transcription",
-    "daemon_config_name":"manual_dev","version":"0.1.0",
-    "secret":"<secret>","port":9031}'
-```
+Symlink the checkout into a Nextcloud installation's `apps/` directory and
+enable it as usual.
 
 Notes for contributors:
 
-- `/heartbeat` must stay unauthenticated — do not put the AppAPI auth middleware
-  in front of it.
-- `/enabled` has a 30-second budget: registrations only. Anything slow belongs in
-  `/init` (40 minutes).
-- The frontend is only loaded behind a top-menu entry, and asset paths go through
-  the AppAPI proxy (`/apps/app_api/proxy`, `/apps/app_api/embedded`).
-- Declarative settings can only be added to the `ai_integration_team` or
-  `declarative_settings` sections.
-- Traffic between Nextcloud and the app is authenticated with a shared secret, so
-  it must run over a trusted network or TLS.
+- **Every user-visible string goes through `t()`**, in Vue and in PHP alike,
+  and into `l10n/ru.json` *and* `l10n/ru.js`. The tests check this: an
+  untranslated string is not a failure anyone notices at runtime.
+- **The bundle name and `Util::addScript` must agree.** They have drifted
+  before; the symptom is a page that renders empty with no error.
+- **The archive endpoints derive the user from the session, never from the
+  request.** A `?user=` parameter would be a request to read someone else's
+  calls, and the tests treat it as such.
+- The chat bot runs on Talk's `BotInvokeEvent`, not a webhook — which is why
+  the opt-out command also works in one-to-one calls.
 
 ## Support
 

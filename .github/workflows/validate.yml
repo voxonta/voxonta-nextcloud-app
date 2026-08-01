@@ -1,0 +1,49 @@
+name: Test and build the release archive
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      - run: composer install --no-interaction --no-progress
+      - run: composer test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: ./build-release.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: done_transcription
+          path: build/*.tar.gz
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: ./build-release.sh
+      # Administrators install this file directly; the Appstore, when we get
+      # there, reads the same archive.
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.tar.gz
