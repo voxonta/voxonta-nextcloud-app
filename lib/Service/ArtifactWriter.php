@@ -36,7 +36,20 @@ class ArtifactWriter {
 	 * people in the call, not for the room.
 	 */
 	private const SHARED = ['summary'];
-	private const SHARED_BY_NAME = ['10_Original_Transcript.md'];
+	/**
+	 * The enriched transcript rather than the original one. Recognition returns
+	 * an unbroken lower-case stream — "ну посмотрим как телемост работает
+	 * интересно даже" — and the analysis already restores the sentences,
+	 * capitals and punctuation from it. Handing a person the raw version when a
+	 * readable one exists beside it is a choice, and it was the wrong one.
+	 *
+	 * The original is still written and still worth having: it is what the
+	 * analysis reads, it is all that survives when a meeting is too short to
+	 * analyse, and it is the only way to tell a speaker's own words from a
+	 * rewrite — the enriched pass silently turned "с рыб кости" into
+	 * "с рыбкостью". None of that is a reason to push it at the room.
+	 */
+	private const SHARED_BY_NAME = ['09_Enriched_Transcript.md'];
 
 	public function __construct(
 		private IRootFolder $rootFolder,

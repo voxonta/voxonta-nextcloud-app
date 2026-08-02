@@ -137,7 +137,7 @@ class CollectArtifacts extends TimedJob {
 		}
 
 		$labels = [
-			'10_Original_Transcript.md' => $this->l10n->t('Transcript'),
+			'09_Enriched_Transcript.md' => $this->l10n->t('Transcript'),
 			'01_Executive_Summary.md' => $this->l10n->t('Summary'),
 		];
 		$links = [];
