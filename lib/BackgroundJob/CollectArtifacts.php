@@ -47,9 +47,13 @@ class CollectArtifacts extends TimedJob {
 	) {
 		parent::__construct($time);
 		$this->setInterval(5 * 60);
-		// Nothing here is urgent: the files are already safe on the gateway,
-		// and this is about moving them, not about producing them.
-		$this->setTimeSensitivity(self::TIME_INSENSITIVE);
+		// Time-sensitive, though the files are safe on the gateway either way.
+		// Insensitive does not mean "low priority", it means Nextcloud may defer
+		// the job during busy periods — measured at 6.5 hours between runs on a
+		// real installation, against the five minutes asked for here. Safe and
+		// prompt are different questions, and the person waiting for their
+		// meeting notes only cares about the second.
+		$this->setTimeSensitivity(self::TIME_SENSITIVE);
 	}
 
 	protected function run($argument): void {
