@@ -1,5 +1,5 @@
 OC.L10N.register(
-    "done_transcription",
+    "voxonta",
     {
     "Meetings": "Встречи",
     "Try again": "Повторить",
@@ -15,7 +15,7 @@ OC.L10N.register(
     "{count} min": "{count} мин",
     "{hours} h {minutes} min": "{hours} ч {minutes} мин",
     "{names} and {count} others": "{names} и ещё {count}",
-    "Done Transcription": "Done Transcription",
+    "Voxonta": "Voxonta",
     "Calls are transcribed per speaker and posted back to the conversation.": "Звонки расшифровываются по говорящим, результат публикуется в беседе.",
     "Transcribe calls": "Расшифровывать звонки",
     "Turn transcription off without uninstalling the app. Calls already running are not interrupted.": "Выключить расшифровку, не удаляя приложение. Уже идущие звонки не прерываются.",

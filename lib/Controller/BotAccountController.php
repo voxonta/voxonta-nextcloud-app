@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Controller;
+namespace OCA\Voxonta\Controller;
 
-use OCA\DoneTranscription\Service\BackendException;
-use OCA\DoneTranscription\Service\BotAccount;
+use OCA\Voxonta\Service\BackendException;
+use OCA\Voxonta\Service\BotAccount;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\PasswordConfirmationRequired;

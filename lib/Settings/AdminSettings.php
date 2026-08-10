@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Settings;
+namespace OCA\Voxonta\Settings;
 
 use OCP\IL10N;
 use OCP\Settings\DeclarativeSettingsTypes;
@@ -54,12 +54,12 @@ class AdminSettings implements IDeclarativeSettingsForm {
 
 	public function getSchema(): array {
 		return [
-			'id' => 'done_transcription_admin',
+			'id' => 'voxonta_admin',
 			'priority' => 50,
 			'section_type' => DeclarativeSettingsTypes::SECTION_TYPE_ADMIN,
 			'section_id' => 'ai',
 			'storage_type' => DeclarativeSettingsTypes::STORAGE_TYPE_INTERNAL,
-			'title' => $this->l('Done Transcription'),
+			'title' => $this->l('Voxonta'),
 			'description' => $this->l('Calls are transcribed per speaker and posted back to the conversation.'),
 
 			'fields' => [

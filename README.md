@@ -1,4 +1,4 @@
-# Done Transcription
+# Voxonta
 
 Automatic transcription and post-call analysis for **Nextcloud Talk**.
 
@@ -32,29 +32,29 @@ No Docker and no AppAPI are needed for the app itself.
 1. Unpack the release archive into your Nextcloud `apps/` directory:
 
    ```bash
-   tar -xzf done_transcription-1.0.0.tar.gz -C /var/www/nextcloud/apps/
-   chown -R www-data:www-data /var/www/nextcloud/apps/done_transcription
+   tar -xzf voxonta-1.0.0.tar.gz -C /var/www/nextcloud/apps/
+   chown -R www-data:www-data /var/www/nextcloud/apps/voxonta
    ```
 
 2. Enable it:
 
    ```bash
-   occ app:enable done_transcription
+   occ app:enable voxonta
    ```
 
    To try it with one team first, enable it for their group only — this hides
    the app from everyone else:
 
    ```bash
-   occ app:enable done_transcription --groups pilot-team
+   occ app:enable voxonta --groups pilot-team
    ```
 
 3. Register the chat bot, so people can stop a recording from the conversation:
 
    ```bash
-   occ talk:bot:install "Done Transcription" \
+   occ talk:bot:install "Voxonta" \
        "$(openssl rand -hex 32)" \
-       "nextcloudapp://done_transcription" \
+       "nextcloudapp://voxonta" \
        "Transcribes calls and accepts the recording commands" \
        --feature event --feature response
    ```
@@ -150,7 +150,7 @@ Notes for contributors:
 
 ## Support
 
-https://github.com/devsoftmus/done-transcription-app/issues
+https://github.com/voxonta/voxonta-nextcloud-app/issues
 
 ## Licence
 

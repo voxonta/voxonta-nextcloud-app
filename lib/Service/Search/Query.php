@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Service\Search;
+namespace OCA\Voxonta\Service\Search;
 
 use OCP\Files\Search\ISearchOperator;
 use OCP\Files\Search\ISearchOrder;

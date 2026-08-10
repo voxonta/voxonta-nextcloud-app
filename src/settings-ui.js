@@ -21,7 +21,7 @@ import { translate as t } from '@nextcloud/l10n'
  * second Vite entry split the app's CSS into a chunk the page never loaded.
  */
 export function wireBotAccount() {
-	const el = document.getElementById('done_transcription_bot')
+	const el = document.getElementById('voxonta_bot')
 	if (el) {
 		setup(el)
 	}
@@ -53,7 +53,7 @@ async function useExisting(el) {
 	const user = el.querySelector('[data-field="user"]')?.value?.trim()
 	const password = el.querySelector('[data-field="password"]')?.value
 	if (!user || !password) {
-		showError(el, new Error(t('done_transcription', 'Enter the account name and its app password.')))
+		showError(el, new Error(t('voxonta', 'Enter the account name and its app password.')))
 		return
 	}
 	setBusy(el, true)
@@ -61,7 +61,7 @@ async function useExisting(el) {
 		await confirmPassword()
 		await post('/api/v1/bot/existing', { user, password })
 		el.querySelector('[data-role="result"]').textContent =
-			t('done_transcription', 'Saved. Reload to see the connection state.')
+			t('voxonta', 'Saved. Reload to see the connection state.')
 	} catch (e) {
 		showError(el, e)
 	} finally {
@@ -70,7 +70,7 @@ async function useExisting(el) {
 }
 
 async function post(path, body) {
-	const response = await fetch(generateUrl(`/apps/done_transcription${path}`), {
+	const response = await fetch(generateUrl(`/apps/voxonta${path}`), {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -89,16 +89,16 @@ function showPassword(el, password) {
 	const box = el.querySelector('[data-role="result"]')
 	box.textContent = ''
 	const label = document.createElement('p')
-	label.textContent = t('done_transcription', 'App password — copy it now, it is not shown again:')
+	label.textContent = t('voxonta', 'App password — copy it now, it is not shown again:')
 	const code = document.createElement('code')
-	code.className = 'done-transcription-bot__password'
+	code.className = 'voxonta-bot__password'
 	code.textContent = password
 	box.append(label, code)
 }
 
 function showError(el, error) {
 	el.querySelector('[data-role="result"]').textContent =
-		t('done_transcription', 'Could not set up the account: {reason}', { reason: error.message })
+		t('voxonta', 'Could not set up the account: {reason}', { reason: error.message })
 }
 
 function setBusy(el, busy) {

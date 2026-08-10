@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
-use OCA\DoneTranscription\Service\ActiveCalls;
+use OCA\Voxonta\Service\ActiveCalls;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IAppConfig;
 use PHPUnit\Framework\TestCase;

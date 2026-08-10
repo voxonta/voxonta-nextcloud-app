@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Service;
+namespace OCA\Voxonta\Service;
 
-use OCA\DoneTranscription\AppInfo\Application;
-use OCA\DoneTranscription\Settings\AdminSettings;
-use OCA\DoneTranscription\Service\Search\BinaryOperator;
-use OCA\DoneTranscription\Service\Search\Comparison;
-use OCA\DoneTranscription\Service\Search\Order;
-use OCA\DoneTranscription\Service\Search\Query;
+use OCA\Voxonta\AppInfo\Application;
+use OCA\Voxonta\Settings\AdminSettings;
+use OCA\Voxonta\Service\Search\BinaryOperator;
+use OCA\Voxonta\Service\Search\Comparison;
+use OCA\Voxonta\Service\Search\Order;
+use OCA\Voxonta\Service\Search\Query;
 use OCP\AppFramework\Http;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Files\File;
@@ -137,7 +137,7 @@ class FileArchive {
 	 * keeps it, and only the first visit pays.
 	 */
 	private function headerCache(): \OCP\ICache {
-		return $this->cacheFactory->createDistributed('done_transcription_headers');
+		return $this->cacheFactory->createDistributed('voxonta_headers');
 	}
 
 	/**

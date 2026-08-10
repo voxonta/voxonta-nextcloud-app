@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Service;
+namespace OCA\Voxonta\Service;
 
-use OCA\DoneTranscription\AppInfo\Application;
+use OCA\Voxonta\AppInfo\Application;
 use OCP\IAppConfig;
 
 /**

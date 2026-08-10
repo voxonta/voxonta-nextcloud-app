@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
       xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
-    <id>done_transcription</id>
-    <name>Done Transcription</name>
+    <id>voxonta</id>
+    <name>Voxonta</name>
     <summary>Transcribes Talk calls per speaker and summarises them</summary>
     <description><![CDATA[
 Automatic transcription and post-call analysis for Nextcloud Talk.
@@ -19,12 +19,12 @@ Nextcloud. It reads its settings from here — whether to transcribe, which
 conversations, how long to keep the results — using an access key the
 administrator sets in the admin settings and enters in the service as well.
     ]]></description>
-    <version>2.9.2</version>
+    <version>3.0.0</version>
     <licence>agpl</licence>
     <author>Done</author>
-    <namespace>DoneTranscription</namespace>
+    <namespace>Voxonta</namespace>
     <category>tools</category>
-    <bugs>https://github.com/devsoftmus/done-transcription-app/issues</bugs>
+    <bugs>https://github.com/voxonta/voxonta-nextcloud-app/issues</bugs>
 
     <dependencies>
         <nextcloud min-version="30" max-version="35"/>
@@ -32,19 +32,19 @@ administrator sets in the admin settings and enters in the service as well.
 
     <navigations>
         <navigation>
-            <id>done_transcription</id>
+            <id>voxonta</id>
             <name>Meetings</name>
-            <route>done_transcription.page.index</route>
+            <route>voxonta.page.index</route>
             <icon>app.svg</icon>
             <order>10</order>
         </navigation>
     </navigations>
 	<settings>
-		<admin>OCA\DoneTranscription\Settings\ServiceStatus</admin>
+		<admin>OCA\Voxonta\Settings\ServiceStatus</admin>
 	</settings>
 
 	<background-jobs>
-		<job>OCA\DoneTranscription\BackgroundJob\WarmHeaderCache</job>
-		<job>OCA\DoneTranscription\BackgroundJob\CollectArtifacts</job>
+		<job>OCA\Voxonta\BackgroundJob\WarmHeaderCache</job>
+		<job>OCA\Voxonta\BackgroundJob\CollectArtifacts</job>
 	</background-jobs>
 </info>

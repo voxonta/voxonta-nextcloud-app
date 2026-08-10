@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Listener;
+namespace OCA\Voxonta\Listener;
 
-use OCA\DoneTranscription\AppInfo\Application;
-use OCA\DoneTranscription\Service\PendingMeetings;
-use OCA\DoneTranscription\Service\RecordingState;
-use OCA\DoneTranscription\Service\TelemostLauncher;
+use OCA\Voxonta\AppInfo\Application;
+use OCA\Voxonta\Service\PendingMeetings;
+use OCA\Voxonta\Service\RecordingState;
+use OCA\Voxonta\Service\TelemostLauncher;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use OCP\IL10N;

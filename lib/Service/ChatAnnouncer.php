@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Service;
+namespace OCA\Voxonta\Service;
 
 use OCP\Http\Client\IClientService;
 use OCP\IL10N;

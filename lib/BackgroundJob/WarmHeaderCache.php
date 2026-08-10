@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\BackgroundJob;
+namespace OCA\Voxonta\BackgroundJob;
 
-use OCA\DoneTranscription\Service\FileArchive;
+use OCA\Voxonta\Service\FileArchive;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
 use Psr\Log\LoggerInterface;

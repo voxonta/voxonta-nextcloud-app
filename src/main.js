@@ -14,7 +14,7 @@ import { wireBotAccount } from './settings-ui.js'
 // that here keeps everything in a single entry — two entries split the app's
 // stylesheet into a chunk the page never loaded, and the archive rendered
 // unstyled.
-const mount = document.getElementById('done_transcription')
+const mount = document.getElementById('voxonta')
 if (mount) {
 	const app = createApp(App)
 	// t/n as global properties, so every component can call them in its template

@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
-use OCA\DoneTranscription\Service\BackendException;
-use OCA\DoneTranscription\Service\FileArchive;
+use OCA\Voxonta\Service\BackendException;
+use OCA\Voxonta\Service\FileArchive;
 use OCP\AppFramework\Http;
 use OCP\Files\File;
 use OCP\Files\Folder;

@@ -17,7 +17,7 @@
 			<NcTextField
 				class="meeting-list__search"
 				v-model="query"
-				:label="t('done_transcription', 'Search')"
+				:label="t('voxonta', 'Search')"
 				trailing-button-icon="close"
 				:show-trailing-button="query !== ''"
 				@update:model-value="onFilterChange"
@@ -31,7 +31,7 @@
 				:options="periods"
 				:clearable="false"
 				label="label"
-				:aria-label-combobox="t('done_transcription', 'Period')"
+				:aria-label-combobox="t('voxonta', 'Period')"
 				@update:model-value="onFilterChange" />
 
 			<!--
@@ -45,8 +45,8 @@
 				class="meeting-list__room"
 				:options="rooms"
 				label="name"
-				:placeholder="t('done_transcription', 'Any conversation')"
-				:aria-label-combobox="t('done_transcription', 'Conversation')"
+				:placeholder="t('voxonta', 'Any conversation')"
+				:aria-label-combobox="t('voxonta', 'Conversation')"
 				@update:model-value="onFilterChange">
 				<template #option="{ name, count }">
 					<span class="meeting-list__room-name">{{ name }}</span>
@@ -60,22 +60,22 @@
 
 		<NcEmptyContent
 			v-else-if="error"
-			:name="t('done_transcription', 'Could not load your meetings')"
+			:name="t('voxonta', 'Could not load your meetings')"
 			:description="error">
 			<template #icon>
 				<AlertIcon />
 			</template>
 			<template #action>
 				<NcButton @click="load">
-					{{ t('done_transcription', 'Try again') }}
+					{{ t('voxonta', 'Try again') }}
 				</NcButton>
 			</template>
 		</NcEmptyContent>
 
 		<NcEmptyContent
 			v-else-if="!meetings.length"
-			:name="t('done_transcription', 'No transcribed meetings yet.')"
-			:description="t('done_transcription', 'Calls you take part in appear here once they end and the transcript is ready.')">
+			:name="t('voxonta', 'No transcribed meetings yet.')"
+			:description="t('voxonta', 'Calls you take part in appear here once they end and the transcript is ready.')">
 			<template #icon>
 				<MicrophoneIcon />
 			</template>
@@ -95,7 +95,7 @@
 				<NcListItem
 					v-for="meeting in group.meetings"
 					:key="meeting.session_id"
-					:name="meeting.room_name || t('done_transcription', 'Untitled call')"
+					:name="meeting.room_name || t('voxonta', 'Untitled call')"
 					:active="meeting.session_id === selectedId"
 					:details="duration(meeting)"
 					@click="$emit('select', meeting)">
@@ -125,7 +125,7 @@
 				class="meeting-list__more"
 				wide
 				@click="loadMore">
-				{{ t('done_transcription', 'Show older meetings') }}
+				{{ t('voxonta', 'Show older meetings') }}
 			</NcButton>
 		</div>
 	</div>
@@ -197,11 +197,11 @@ export default {
 		// Built here rather than as a constant so the labels follow the user's
 		// language.
 		this.periods = [
-			{ id: 'all', label: t('done_transcription', 'Any time') },
-			{ id: 'today', label: t('done_transcription', 'Today') },
-			{ id: 'week', label: t('done_transcription', 'Last 7 days') },
-			{ id: 'month', label: t('done_transcription', 'Last 30 days') },
-			{ id: 'year', label: t('done_transcription', 'Last year') },
+			{ id: 'all', label: t('voxonta', 'Any time') },
+			{ id: 'today', label: t('voxonta', 'Today') },
+			{ id: 'week', label: t('voxonta', 'Last 7 days') },
+			{ id: 'month', label: t('voxonta', 'Last 30 days') },
+			{ id: 'year', label: t('voxonta', 'Last year') },
 		]
 		this.period = this.periods[0]
 	},
@@ -224,16 +224,16 @@ export default {
 			const bucket = (ts) => {
 				const d = new Date(ts * 1000)
 				if (d >= today) {
-					return { key: 'today', label: this.t('done_transcription', 'Today') }
+					return { key: 'today', label: this.t('voxonta', 'Today') }
 				}
 				if (d >= yesterday) {
-					return { key: 'yesterday', label: this.t('done_transcription', 'Yesterday') }
+					return { key: 'yesterday', label: this.t('voxonta', 'Yesterday') }
 				}
 				if (d >= weekStart) {
-					return { key: 'this-week', label: this.t('done_transcription', 'This week') }
+					return { key: 'this-week', label: this.t('voxonta', 'This week') }
 				}
 				if (d >= lastWeekStart) {
-					return { key: 'last-week', label: this.t('done_transcription', 'Last week') }
+					return { key: 'last-week', label: this.t('voxonta', 'Last week') }
 				}
 				// The browser localises the month name for us.
 				const label = d.toLocaleDateString([], { month: 'long', year: 'numeric' })
@@ -247,7 +247,7 @@ export default {
 				// keep it visible under a heading of its own rather than drop it.
 				const b = meeting.call_start_ts
 					? bucket(meeting.call_start_ts)
-					: { key: 'undated', label: this.t('done_transcription', 'Earlier') }
+					: { key: 'undated', label: this.t('voxonta', 'Earlier') }
 				if (!current || current.key !== b.key) {
 					current = { key: b.key, label: b.label, meetings: [] }
 					groups.push(current)
@@ -314,7 +314,7 @@ export default {
 				// Say what happened rather than showing an empty list — an
 				// empty list reads as "you have no meetings", which is a
 				// different and misleading statement.
-				this.error = t('done_transcription', 'Please try again.')
+				this.error = t('voxonta', 'Please try again.')
 				console.error('failed to load meetings', e)
 			} finally {
 				this.loading = false
@@ -381,7 +381,7 @@ export default {
 			// the timestamp anyway prints "00:00" and reads as a midnight call.
 			if (meeting.has_time === false) {
 				return sameDay
-					? t('done_transcription', 'Today')
+					? t('voxonta', 'Today')
 					: started.toLocaleDateString()
 			}
 			const time = started.toLocaleTimeString([], {
@@ -391,7 +391,7 @@ export default {
 			// "Today, 14:05" is easier to place than a full date for the calls
 			// people look for most often — the recent ones.
 			return sameDay
-				? `${t('done_transcription', 'Today')}, ${time}`
+				? `${t('voxonta', 'Today')}, ${time}`
 				: `${started.toLocaleDateString()}, ${time}`
 		},
 
@@ -402,8 +402,8 @@ export default {
 			}
 			const minutes = Math.round((end - start) / 60)
 			return minutes < 60
-				? t('done_transcription', '{count} min', { count: minutes })
-				: t('done_transcription', '{hours} h {minutes} min', {
+				? t('voxonta', '{count} min', { count: minutes })
+				: t('voxonta', '{hours} h {minutes} min', {
 					hours: Math.floor(minutes / 60),
 					minutes: minutes % 60,
 				})
@@ -418,7 +418,7 @@ export default {
 			// fall back to a count only when the list is long.
 			return names.length <= 3
 				? names.join(', ')
-				: t('done_transcription', '{names} and {count} others', {
+				: t('voxonta', '{names} and {count} others', {
 					names: names.slice(0, 2).join(', '),
 					count: names.length - 2,
 				})

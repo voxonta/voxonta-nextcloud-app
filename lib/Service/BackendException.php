@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Service;
+namespace OCA\Voxonta\Service;
 
 /**
  * Carries the status the client should see, so controllers do not have to

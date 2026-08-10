@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Controller;
+namespace OCA\Voxonta\Controller;
 
-use OCA\DoneTranscription\Service\ActiveCalls;
-use OCA\DoneTranscription\Service\ServiceConfig;
-use OCA\DoneTranscription\Service\TalkParticipants;
+use OCA\Voxonta\Service\ActiveCalls;
+use OCA\Voxonta\Service\ServiceConfig;
+use OCA\Voxonta\Service\TalkParticipants;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;

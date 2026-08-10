@@ -10,7 +10,7 @@
 import { generateUrl } from '@nextcloud/router'
 
 async function request(path, { signal } = {}) {
-	const response = await fetch(generateUrl(`/apps/done_transcription/api/v1${path}`), {
+	const response = await fetch(generateUrl(`/apps/voxonta/api/v1${path}`), {
 		headers: { Accept: 'application/json' },
 		signal,
 	})
