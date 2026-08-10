@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Controller;
+namespace OCA\Voxonta\Controller;
 
-use OCA\DoneTranscription\AppInfo\Application;
+use OCA\Voxonta\AppInfo\Application;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;

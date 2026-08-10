@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
-use OCA\DoneTranscription\Service\BackendException;
-use OCA\DoneTranscription\Service\BotAccount;
+use OCA\Voxonta\Service\BackendException;
+use OCA\Voxonta\Service\BotAccount;
 use OC\Authentication\Token\IProvider;
 use OCP\IAppConfig;
 use OCP\IUser;
@@ -89,7 +89,7 @@ class BotAccountTest extends TestCase {
 		$this->assertSame(BotAccount::MANAGED_UID, $result['user']);
 		$this->assertNotSame('', $result['password']);
 		// What it returns is the token that was minted, not the login password.
-		$this->assertSame($this->tokens['Done Transcription service'], $result['password']);
+		$this->assertSame($this->tokens['Voxonta service'], $result['password']);
 	}
 
 	public function testTheCredentialsAreStoredForTheServiceToFetch(): void {
@@ -145,7 +145,7 @@ class BotAccountTest extends TestCase {
 		$second = $bot->regenerate();
 
 		$this->assertNotSame($first, $second);
-		$this->assertContains('Done Transcription service', $this->invalidated,
+		$this->assertContains('Voxonta service', $this->invalidated,
 			'the previous token must be revoked, not left live beside the new one');
 		$this->assertSame($second, $bot->credentials()['password']);
 	}

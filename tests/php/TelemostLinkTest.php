@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
-use OCA\DoneTranscription\Service\TelemostLauncher;
+use OCA\Voxonta\Service\TelemostLauncher;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 

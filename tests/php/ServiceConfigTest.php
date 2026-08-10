@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
-use OCA\DoneTranscription\Service\BotAccount;
-use OCA\DoneTranscription\Service\ServiceConfig;
-use OCA\DoneTranscription\Settings\AdminSettings;
+use OCA\Voxonta\Service\BotAccount;
+use OCA\Voxonta\Service\ServiceConfig;
+use OCA\Voxonta\Settings\AdminSettings;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IAppConfig;
 use PHPUnit\Framework\TestCase;
@@ -105,11 +105,11 @@ class ServiceConfigTest extends TestCase {
 	}
 
 	public function testTheBotCredentialsArePassedToTheService(): void {
-		$this->botCredentials = ['user' => 'done-transcription-bot', 'password' => 'app-pw'];
+		$this->botCredentials = ['user' => 'voxonta-bot', 'password' => 'app-pw'];
 
 		$settings = $this->config()->forService();
 
-		$this->assertSame(['user' => 'done-transcription-bot', 'password' => 'app-pw'],
+		$this->assertSame(['user' => 'voxonta-bot', 'password' => 'app-pw'],
 			$settings['nextcloud']);
 	}
 

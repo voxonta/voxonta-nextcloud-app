@@ -14,7 +14,7 @@
 <template>
 	<div class="meeting-detail">
 		<header class="meeting-detail__header">
-			<h2>{{ meeting.room_name || t('done_transcription', 'Untitled call') }}</h2>
+			<h2>{{ meeting.room_name || t('voxonta', 'Untitled call') }}</h2>
 			<p class="meeting-detail__meta">
 				{{ formattedDate }}
 				<template v-if="formattedDuration"> · {{ formattedDuration }}</template>
@@ -32,7 +32,7 @@
 						<template #icon>
 							<DownloadIcon :size="20" />
 						</template>
-						{{ t('done_transcription', 'Download summary') }}
+						{{ t('voxonta', 'Download summary') }}
 					</NcActionButton>
 					<NcActionButton
 						v-if="meeting.has_transcript !== false"
@@ -40,7 +40,7 @@
 						<template #icon>
 							<DownloadIcon :size="20" />
 						</template>
-						{{ t('done_transcription', 'Download transcript') }}
+						{{ t('voxonta', 'Download transcript') }}
 					</NcActionButton>
 				</NcActions>
 			</div>
@@ -73,17 +73,17 @@
 					<template #icon>
 						<TextIcon :size="20" />
 					</template>
-					{{ t('done_transcription', 'Show transcript') }}
+					{{ t('voxonta', 'Show transcript') }}
 				</NcButton>
 
 				<template v-else>
-					<h3 v-if="summary">{{ t('done_transcription', 'Transcript') }}</h3>
+					<h3 v-if="summary">{{ t('voxonta', 'Transcript') }}</h3>
 
 					<NcLoadingIcon v-if="loadingTranscript" :size="24" />
 
 					<NcEmptyContent
 						v-else-if="transcriptError"
-						:name="t('done_transcription', 'Could not load the transcript.')">
+						:name="t('voxonta', 'Could not load the transcript.')">
 						<template #icon>
 							<AlertIcon />
 						</template>
@@ -91,7 +91,7 @@
 
 					<NcEmptyContent
 						v-else-if="!transcript"
-						:name="t('done_transcription', 'Nobody spoke during this call, or the audio could not be captured.')">
+						:name="t('voxonta', 'Nobody spoke during this call, or the audio could not be captured.')">
 						<template #icon>
 							<MicrophoneOffIcon />
 						</template>
@@ -167,8 +167,8 @@ export default {
 			}
 			const minutes = Math.round((end - start) / 60)
 			return minutes < 60
-				? t('done_transcription', '{count} min', { count: minutes })
-				: t('done_transcription', '{hours} h {minutes} min', {
+				? t('voxonta', '{count} min', { count: minutes })
+				: t('voxonta', '{hours} h {minutes} min', {
 					hours: Math.floor(minutes / 60),
 					minutes: minutes % 60,
 				})
@@ -226,7 +226,7 @@ export default {
 					text = await fetchTranscript(this.meeting.session_id)
 				} catch (e) {
 					console.error('failed to load transcript', e)
-					this.warn(t('done_transcription', 'Could not load the transcript.'))
+					this.warn(t('voxonta', 'Could not load the transcript.'))
 					return
 				}
 			}
@@ -234,10 +234,10 @@ export default {
 				return
 			}
 
-			const title = this.meeting.room_name || t('done_transcription', 'Untitled call')
+			const title = this.meeting.room_name || t('voxonta', 'Untitled call')
 			const label = what === 'summary'
-				? t('done_transcription', 'summary')
-				: t('done_transcription', 'transcript')
+				? t('voxonta', 'summary')
+				: t('voxonta', 'transcript')
 			// Slashes and colons are not filename characters on every system.
 			const name = `${title} — ${label}.md`.replace(/[\\/:*?"<>|]/g, '-')
 

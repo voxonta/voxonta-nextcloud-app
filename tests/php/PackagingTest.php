@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
 use PHPUnit\Framework\TestCase;
 
@@ -14,7 +14,7 @@ use PHPUnit\Framework\TestCase;
  * name in one file not matching a name in another.
  */
 class PackagingTest extends TestCase {
-	private const APP_ID = 'done_transcription';
+	private const APP_ID = 'voxonta';
 
 	private function root(): string {
 		return dirname(__DIR__, 2);

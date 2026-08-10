@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\BackgroundJob;
+namespace OCA\Voxonta\BackgroundJob;
 
-use OCA\DoneTranscription\Service\ArtifactWriter;
-use OCA\DoneTranscription\Service\ChatAnnouncer;
-use OCA\DoneTranscription\Service\GatewayClient;
-use OCA\DoneTranscription\Service\PendingMeetings;
-use OCA\DoneTranscription\Service\TalkParticipants;
+use OCA\Voxonta\Service\ArtifactWriter;
+use OCA\Voxonta\Service\ChatAnnouncer;
+use OCA\Voxonta\Service\GatewayClient;
+use OCA\Voxonta\Service\PendingMeetings;
+use OCA\Voxonta\Service\TalkParticipants;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
 use OCP\IL10N;

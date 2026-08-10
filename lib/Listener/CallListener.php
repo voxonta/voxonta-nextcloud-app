@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Listener;
+namespace OCA\Voxonta\Listener;
 
-use OCA\DoneTranscription\Service\ActiveCalls;
-use OCA\DoneTranscription\Service\PendingMeetings;
+use OCA\Voxonta\Service\ActiveCalls;
+use OCA\Voxonta\Service\PendingMeetings;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use Psr\Log\LoggerInterface;

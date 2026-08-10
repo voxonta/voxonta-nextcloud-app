@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Service;
+namespace OCA\Voxonta\Service;
 
-use OCA\DoneTranscription\AppInfo\Application;
+use OCA\Voxonta\AppInfo\Application;
 use OC\Authentication\Token\IProvider;
 use OCP\Authentication\Token\IToken;
 use OCP\IAppConfig;
@@ -48,7 +48,7 @@ class BotAccount {
 	public const KEY_MANAGED = 'bot_managed';
 
 	/** The uid the app uses for the account it creates. */
-	public const MANAGED_UID = 'done-transcription-bot';
+	public const MANAGED_UID = 'voxonta-bot';
 
 	public function __construct(
 		private IUserManager $userManager,
@@ -190,7 +190,7 @@ class BotAccount {
 	 * revokes the previous credential rather than leaving both live.
 	 */
 	private function freshAppPassword(string $uid): string {
-		$name = 'Done Transcription service';
+		$name = 'Voxonta service';
 		try {
 			$this->tokenProvider->invalidateTokensOfUser($uid, $name);
 

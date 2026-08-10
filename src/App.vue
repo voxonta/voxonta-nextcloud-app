@@ -13,7 +13,7 @@
 	them.
 -->
 <template>
-	<NcContent app-name="done_transcription">
+	<NcContent app-name="voxonta">
 		<NcAppContent :show-details="!!selected" @update:showDetails="selected = null">
 			<template #list>
 				<MeetingList
@@ -25,8 +25,8 @@
 
 			<NcEmptyContent
 				v-else
-				:name="t('done_transcription', 'No meeting selected')"
-				:description="t('done_transcription', 'Select a meeting to read its transcript.')">
+				:name="t('voxonta', 'No meeting selected')"
+				:description="t('voxonta', 'Select a meeting to read its transcript.')">
 				<template #icon>
 					<MicrophoneIcon />
 				</template>

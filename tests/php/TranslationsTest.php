@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Tests;
+namespace OCA\Voxonta\Tests;
 
 use PHPUnit\Framework\TestCase;
 
@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
  * — and check each against the files Nextcloud actually loads.
  */
 class TranslationsTest extends TestCase {
-	private const APP_ID = 'done_transcription';
+	private const APP_ID = 'voxonta';
 
 	private function root(): string {
 		return dirname(__DIR__, 2);
@@ -31,7 +31,7 @@ class TranslationsTest extends TestCase {
 		return $json['translations'];
 	}
 
-	/** @return string[] strings passed to t('done_transcription', '…') */
+	/** @return string[] strings passed to t('voxonta', '…') */
 	private function frontendStrings(): array {
 		$found = [];
 		foreach ($this->files($this->root() . '/src', ['vue', 'js']) as $file) {

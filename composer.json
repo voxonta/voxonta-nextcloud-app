@@ -1,5 +1,5 @@
 {
-    "name": "devsoftmus/done-transcription-app",
+    "name": "voxonta/voxonta-nextcloud-app",
     "description": "Transcription and post-call analysis for Nextcloud Talk",
     "license": "AGPL-3.0-or-later",
     "config": {
@@ -11,12 +11,12 @@
     },
     "autoload": {
         "psr-4": {
-            "OCA\\DoneTranscription\\": "lib/"
+            "OCA\\Voxonta\\": "lib/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "OCA\\DoneTranscription\\Tests\\": "tests/php/",
+            "OCA\\Voxonta\\Tests\\": "tests/php/",
             "OCP\\": "vendor/nextcloud/ocp/OCP/"
         }
     },

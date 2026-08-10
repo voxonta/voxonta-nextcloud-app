@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-namespace OCA\DoneTranscription\Settings;
+namespace OCA\Voxonta\Settings;
 
-use OCA\DoneTranscription\AppInfo\Application;
-use OCA\DoneTranscription\Service\BotAccount;
-use OCA\DoneTranscription\Service\ServiceConfig;
+use OCA\Voxonta\AppInfo\Application;
+use OCA\Voxonta\Service\BotAccount;
+use OCA\Voxonta\Service\ServiceConfig;
 use OCP\AppFramework\Http\TemplateResponse;
 use OCP\IL10N;
 use OCP\Settings\ISettings;

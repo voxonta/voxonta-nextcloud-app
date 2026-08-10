@@ -11,7 +11,7 @@
 # stale one — that mismatch is invisible until the page renders empty.
 set -euo pipefail
 
-APP_ID=done_transcription
+APP_ID=voxonta
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${ROOT}/build"
 
