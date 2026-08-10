@@ -31,7 +31,7 @@ class TelemostLauncher {
 	 * strings, from mobile, out of calendar invitations. Whether it is really a
 	 * meeting is the launcher's call, not ours.
 	 */
-	private const LINK = '~https?://telemost\.yandex\.[a-z]+/j/\d+[^\s]*~i';
+	private const LINK = '~https?://telemost(?:\.[a-z0-9-]+)*\.yandex\.[a-z]+/j/\d+[^\s]*~i';
 
 	public function __construct(
 		private IClientService $clientService,
