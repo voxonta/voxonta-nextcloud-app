@@ -31,6 +31,15 @@ class PendingMeetings {
 	 */
 	public const GIVE_UP_AFTER = 14 * 24 * 3600;
 
+	/**
+	 * How long to wait after a failed attempt, doubling each time up to the cap.
+	 * The base matches the cron interval — retrying sooner than the job runs
+	 * would be pointless — and the cap keeps a hopeless entry to four requests
+	 * a day instead of nearly three hundred.
+	 */
+	public const BACKOFF_BASE = 5 * 60;
+	public const BACKOFF_CAP = 6 * 3600;
+
 	public function __construct(
 		private IAppConfig $appConfig,
 		private ITimeFactory $time,
@@ -71,14 +80,21 @@ class PendingMeetings {
 	}
 
 	/**
-	 * What to ask about, oldest first, dropping whatever we have waited too
-	 * long for.
+	 * What to ask about now, oldest first: too old to bother with is dropped,
+	 * and whatever is still backing off after failures is skipped.
+	 *
+	 * The skipping is the point. A round takes a handful of meetings from the
+	 * front of this list, so entries that can never be collected — a call whose
+	 * audio never reached the gateway, say — used to hold the front of the queue
+	 * for a fortnight and starve every meeting behind them. On 2026-08-11 six
+	 * such entries kept the batch full and no new meeting was collected at all.
 	 *
 	 * @return array<int, array<string, mixed>>
 	 */
 	public function due(): array {
 		$pending = $this->all();
-		$cutoff = $this->time->getTime() - self::GIVE_UP_AFTER;
+		$now = $this->time->getTime();
+		$cutoff = $now - self::GIVE_UP_AFTER;
 
 		$live = array_filter($pending,
 			static fn (array $m) => (int)$m['ended_at'] > $cutoff);
@@ -88,9 +104,55 @@ class PendingMeetings {
 			$this->store($live);
 		}
 
-		$live = array_values($live);
-		usort($live, static fn (array $a, array $b) => $a['ended_at'] <=> $b['ended_at']);
-		return $live;
+		$ready = array_filter($live,
+			static fn (array $m) => (int)($m['next_try'] ?? 0) <= $now);
+
+		$ready = array_values($ready);
+		usort($ready, static fn (array $a, array $b) => $a['ended_at'] <=> $b['ended_at']);
+		return $ready;
+	}
+
+	/**
+	 * The gateway had nothing for this meeting: ask again later, and later still
+	 * next time.
+	 *
+	 * Doubling from the cron interval up to a cap means a meeting that will
+	 * never arrive costs a handful of requests a day instead of one every five
+	 * minutes, and — more importantly — stops standing in front of meetings that
+	 * are ready. A single failure barely delays anything; a persistent one steps
+	 * aside on its own.
+	 */
+	public function missed(string $sessionId): void {
+		$pending = $this->all();
+		if (!isset($pending[$sessionId])) {
+			return;
+		}
+		$misses = (int)($pending[$sessionId]['misses'] ?? 0) + 1;
+		$wait = min(self::BACKOFF_CAP, self::BACKOFF_BASE * (2 ** ($misses - 1)));
+		$pending[$sessionId]['misses'] = $misses;
+		$pending[$sessionId]['next_try'] = $this->time->getTime() + $wait;
+		$this->store($pending);
+
+		// Logged once, when it starts to matter: a meeting nobody will ever
+		// collect should be visible before it has been silently retried for days.
+		if ($wait >= self::BACKOFF_CAP) {
+			$this->logger->warning(
+				'{session}: {misses} failed attempts, backing off to {hours}h',
+				['session' => $sessionId, 'misses' => $misses,
+					'hours' => (int)round($wait / 3600)],
+			);
+		}
+	}
+
+	/** The gateway answered: start over from a short interval. */
+	public function answered(string $sessionId): void {
+		$pending = $this->all();
+		if (!isset($pending[$sessionId]) || (int)($pending[$sessionId]['misses'] ?? 0) === 0) {
+			return;
+		}
+		$pending[$sessionId]['misses'] = 0;
+		$pending[$sessionId]['next_try'] = 0;
+		$this->store($pending);
 	}
 
 	/**

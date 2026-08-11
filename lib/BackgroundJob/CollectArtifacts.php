@@ -35,6 +35,13 @@ class CollectArtifacts extends TimedJob {
 	 */
 	private const BATCH = 5;
 
+	/**
+	 * How long a meeting the gateway has never heard of stays in the queue.
+	 * Shorter than PendingMeetings::GIVE_UP_AFTER because "unknown" is a
+	 * definite answer, where an unreachable gateway is not.
+	 */
+	private const UNKNOWN_GRACE = 24 * 3600;
+
 	public function __construct(
 		ITimeFactory $time,
 		private PendingMeetings $pending,
@@ -62,25 +69,44 @@ class CollectArtifacts extends TimedJob {
 		}
 
 		foreach (array_slice($this->pending->due(), 0, self::BATCH) as $meeting) {
+			$sessionId = (string)($meeting['session_id'] ?? '');
 			try {
-				$this->collect($meeting);
+				if ($this->collect($meeting)) {
+					$this->pending->answered($sessionId);
+				} else {
+					$this->pending->missed($sessionId);
+				}
 			} catch (\Throwable $e) {
 				// One meeting's trouble must not stop the others: a failure
-				// leaves it pending and the next tick tries again.
+				// leaves it pending, backing off, and the next tick tries again.
+				$this->pending->missed($sessionId);
 				$this->logger->error('collecting {session} failed', [
-					'session' => $meeting['session_id'] ?? '?',
+					'session' => $sessionId ?: '?',
 					'exception' => $e,
 				]);
 			}
 		}
 	}
 
-	/** @param array<string, mixed> $meeting */
-	private function collect(array $meeting): void {
+	/**
+	 * @param array<string, mixed> $meeting
+	 * @return bool whether the gateway answered; false makes the caller back off
+	 */
+	private function collect(array $meeting): bool {
 		$sessionId = (string)$meeting['session_id'];
 		$state = $this->gateway->meeting($sessionId);
 		if ($state === null) {
-			return;  // unreachable or not known yet — ask again next tick
+			// The gateway does not know this meeting and enough time has passed
+			// that it never will: the call's audio never got there. Waiting out
+			// the fortnight would only keep it in front of meetings that exist.
+			if ($this->gateway->lastAnswerWasUnknown() && $this->hopeless($meeting)) {
+				$this->logger->warning(
+					'giving up on {session}: the gateway has not known it for a day',
+					['session' => $sessionId],
+				);
+				$this->pending->done($sessionId);
+			}
+			return false;
 		}
 
 		$held = $meeting['written'] ?? [];
@@ -124,6 +150,21 @@ class CollectArtifacts extends TimedJob {
 			}
 			$this->pending->done($sessionId);
 		}
+		return true;
+	}
+
+	/**
+	 * Whether a meeting the gateway does not know is worth asking about again.
+	 *
+	 * A day, not the fortnight the queue otherwise allows: the gateway records a
+	 * meeting when the call starts, so if it still has never heard of one a day
+	 * later, the audio never arrived and nothing will change that.
+	 *
+	 * @param array<string, mixed> $meeting
+	 */
+	private function hopeless(array $meeting): bool {
+		$ended = (int)($meeting['ended_at'] ?? 0);
+		return $ended > 0 && $this->time->getTime() - $ended > self::UNKNOWN_GRACE;
 	}
 
 	/**

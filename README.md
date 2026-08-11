@@ -120,6 +120,15 @@ this app, which scopes the answer to the person asking: the service isolates by
 tenant, not by user, and only Nextcloud knows who is on the other end of the
 request.
 
+Finished meetings are collected by a background job, a few per cron tick. A
+meeting whose files cannot be fetched is asked about again later, and later
+still after each further failure — a doubling wait up to six hours. Without
+that, a meeting that can never be collected sits at the front of the queue and
+starves the ones behind it: in August 2026 six such entries stopped collection
+entirely for a week. If the service reports it has never heard of a meeting at
+all, and a day has passed, the app stops asking — the call's audio never
+arrived, and no amount of retrying changes that.
+
 ## Development
 
 ```bash

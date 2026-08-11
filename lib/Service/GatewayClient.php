@@ -24,11 +24,22 @@ class GatewayClient {
 	/** Generous: an analysis file can be a few hundred kilobytes. */
 	private const TIMEOUT = 30;
 
+	/** Whether the last meeting() failure was "no such meeting" rather than "cannot ask". */
+	private bool $lastWasUnknown = false;
+
 	public function __construct(
 		private IClientService $clientService,
 		private IAppConfig $appConfig,
 		private LoggerInterface $logger,
 	) {
+	}
+
+	/**
+	 * True when the last meeting() returned null because the gateway does not
+	 * know the meeting, rather than because it could not be reached.
+	 */
+	public function lastAnswerWasUnknown(): bool {
+		return $this->lastWasUnknown;
 	}
 
 	public function configured(): bool {
@@ -45,12 +56,19 @@ class GatewayClient {
 	 */
 	public function meeting(string $sessionId): ?array {
 		$url = $this->base() . '/v1/meetings/' . rawurlencode($sessionId);
+		$this->lastWasUnknown = false;
 		try {
 			$response = $this->clientService->newClient()->get($url, [
 				'headers' => ['Authorization' => 'Bearer ' . $this->token()],
 				'timeout' => self::TIMEOUT,
 			]);
 		} catch (\Throwable $e) {
+			// A 404 means the gateway has no such meeting — the call never
+			// reached it, and no amount of asking will change that. Everything
+			// else is "not right now". Both return null, but the caller can tell
+			// them apart through lastAnswerWasUnknown() and give up early on the
+			// first rather than retrying it for a fortnight.
+			$this->lastWasUnknown = str_contains($e->getMessage(), '404');
 			$this->logger->warning('could not reach the gateway for {session}: {message}',
 				['session' => $sessionId, 'message' => $e->getMessage()]);
 			return null;
