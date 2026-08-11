@@ -88,12 +88,36 @@ class TelemostLauncher {
 		return (string)($body['session_hint'] ?? '');
 	}
 
+	/**
+	 * Where to ask for a bot. The dedicated setting when an administrator filled
+	 * one in, the gateway's address otherwise — they are the same service, and
+	 * asking for two addresses invited them to drift apart.
+	 */
 	private function base(): string {
-		return rtrim($this->appConfig->getValueString(
+		$own = rtrim($this->appConfig->getValueString(
 			Application::APP_ID, AdminSettings::KEY_TELEMOST_URL, ''), '/');
+		if ($own !== '') {
+			return $own;
+		}
+		return rtrim($this->appConfig->getValueString(
+			Application::APP_ID, AdminSettings::KEY_GATEWAY_URL, ''), '/');
 	}
 
+	/**
+	 * Which key to present.
+	 *
+	 * The gateway key, because it says whose meeting this is: the launcher
+	 * verifies it and files the meeting under this installation's tenant. The
+	 * separate Telemost key is a leftover from when the launcher had one shared
+	 * key for everybody — it still works, so an installation that has one keeps
+	 * working, but it does not identify anyone.
+	 */
 	private function token(): string {
+		$gateway = $this->appConfig->getValueString(
+			Application::APP_ID, AdminSettings::KEY_GATEWAY_TOKEN, '');
+		if ($gateway !== '') {
+			return $gateway;
+		}
 		return $this->appConfig->getValueString(
 			Application::APP_ID, AdminSettings::KEY_TELEMOST_TOKEN, '');
 	}
