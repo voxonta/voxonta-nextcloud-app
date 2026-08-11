@@ -6,6 +6,11 @@ Calls are transcribed per speaker, published back to the room when the call
 ends, and turned into a readable summary — who took part, what was decided, what
 to do next.
 
+Part of [Voxonta](https://voxonta.com). Documentation:
+[installing this app](https://voxonta.com/docs/install/) ·
+[what happens to your data](https://voxonta.com/docs/data/) ·
+[how it works](https://voxonta.com/docs/how-it-works/).
+
 ## What it does
 
 - **Per-speaker transcript.** Every participant is captured on their own audio
@@ -32,7 +37,7 @@ No Docker and no AppAPI are needed for the app itself.
 1. Unpack the release archive into your Nextcloud `apps/` directory:
 
    ```bash
-   tar -xzf voxonta-1.0.0.tar.gz -C /var/www/nextcloud/apps/
+   tar -xzf voxonta-3.0.0.tar.gz -C /var/www/nextcloud/apps/
    chown -R www-data:www-data /var/www/nextcloud/apps/voxonta
    ```
 
@@ -62,9 +67,8 @@ No Docker and no AppAPI are needed for the app itself.
    The secret is unused for an in-app bot — Talk requires the argument — but it
    should still be random.
 
-4. Open **Administration settings → Artificial intelligence → Done
-   Transcription** and enter the address and token of your transcription
-   service.
+4. Open **Administration settings → Voxonta** and enter the address and token of
+   your transcription service.
 
 ## Upgrade
 
@@ -85,8 +89,13 @@ room after the call.
 | `/запись`, `/record` | resume |
 
 Either spelling works whatever language the room speaks. The command works
-before the call starts and while it is running. Recording stops for everyone in
-that call.
+before the call starts and while it is running, and stops recording for everyone
+in that call.
+
+It reaches the app through the Talk bot, so it works in the conversations where
+the bot was set up (step 3 above) — in practice group and public rooms. A
+one-to-one conversation normally has no bot set up, and the command has no effect
+there.
 
 **Language.** The app speaks English and Russian. The interface follows the
 language each person set in Nextcloud; the bot's replies, the menu entry and the
@@ -102,7 +111,9 @@ answers, so a ringing call is never recorded.
 - Transcripts are stored in Nextcloud and shared with the call participants.
 - The opt-out command applies to the entire call, for every participant.
 - Whether transcription and analysis run on your own infrastructure or on a
-  hosted backend depends on how your administrator configured it.
+  hosted backend depends on how your administrator configured it. For the hosted
+  service, what is kept and for how long is spelled out at
+  [voxonta.com/docs/data](https://voxonta.com/docs/data/).
 
 ## How it works
 
@@ -161,8 +172,11 @@ Notes for contributors:
 - **The archive endpoints derive the user from the session, never from the
   request.** A `?user=` parameter would be a request to read someone else's
   calls, and the tests treat it as such.
-- The chat bot runs on Talk's `BotInvokeEvent`, not a webhook — which is why
-  the opt-out command also works in one-to-one calls.
+- The chat bot runs on Talk's `BotInvokeEvent`, not a webhook, so the app needs
+  no inbound route. The event only fires in conversations the bot was set up in,
+  which is why the opt-out command does nothing in a one-to-one call — a separate
+  matter from the bot user not being a member of such rooms, which is what stops
+  the app announcing there.
 
 ## Support
 
