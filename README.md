@@ -120,6 +120,13 @@ this app, which scopes the answer to the person asking: the service isolates by
 tenant, not by user, and only Nextcloud knows who is on the other end of the
 request.
 
+When a meeting is written up, the app posts the links into the conversation —
+but only where the bot is a member. It never is in a one-to-one room: those
+hold exactly two people, and the bot hears the call through the signalling
+server rather than as a participant. Nobody is left uninformed either way,
+because the summary and the transcript are shared with each participant
+personally, which is what a one-to-one call has always relied on.
+
 Finished meetings are collected by a background job, a few per cron tick. A
 meeting whose files cannot be fetched is asked about again later, and later
 still after each further failure — a doubling wait up to six hours. Without

@@ -32,10 +32,30 @@ class ChatAnnouncer {
 	public function __construct(
 		private IClientService $clientService,
 		private BotAccount $botAccount,
+		private TalkParticipants $participants,
 		private IURLGenerator $urlGenerator,
 		private IL10N $l10n,
 		private LoggerInterface $logger,
 	) {
+	}
+
+	/**
+	 * Whether posting is worth attempting: only a member of a conversation may
+	 * write to it.
+	 *
+	 * A one-to-one room holds exactly two people and the bot is never one of
+	 * them — it hears the call through the signalling server, not as a member —
+	 * so posting there answers 404 every single time. Group rooms it was never
+	 * added to behave the same way. Asking first turns a warning per meeting
+	 * into nothing at all, and costs nothing: the participants were about to be
+	 * read anyway for sharing.
+	 *
+	 * An empty list means "could not tell" (Talk absent, room gone), not "no
+	 * members" — in that case the attempt goes ahead as before.
+	 */
+	private function mayPost(string $token, string $botUser): bool {
+		$members = $this->participants->userIds($token);
+		return $members === [] || in_array($botUser, $members, true);
 	}
 
 	/**
@@ -53,6 +73,14 @@ class ChatAnnouncer {
 		$credentials = $this->botAccount->credentials();
 		if ($credentials === null) {
 			$this->logger->warning('no bot account — cannot announce {token}',
+				['token' => $token]);
+			return false;
+		}
+
+		if (!$this->mayPost($token, $credentials['user'])) {
+			// Not a failure: the files are shared with each participant
+			// personally, which is how a one-to-one call has always told people.
+			$this->logger->debug('not a member of {token} — nothing announced',
 				['token' => $token]);
 			return false;
 		}
