@@ -90,7 +90,10 @@ class CollectArtifacts extends TimedJob {
 
 	/**
 	 * @param array<string, mixed> $meeting
-	 * @return bool whether the gateway answered; false makes the caller back off
+	 * @return bool whether this meeting is settled for now; false makes the
+	 *              caller back off and ask again later — either because the
+	 *              gateway said nothing useful, or because it said "failed",
+	 *              which a re-run can still turn into files
 	 */
 	private function collect(array $meeting): bool {
 		$sessionId = (string)$meeting['session_id'];
@@ -138,16 +141,26 @@ class CollectArtifacts extends TimedJob {
 		}
 
 		if ($state['final']) {
-			// Terminal: everything that will exist, exists. A failed meeting is
-			// terminal too — retrying it would only ask the same question.
 			if ($state['status'] === 'failed') {
-				$this->logger->warning('{session} finished badly: {detail}',
+				// A failure is not the end of the story. The gateway re-runs an
+				// analysis once the reason it fell over is fixed, and then the
+				// files appear against a meeting we had already written off —
+				// with nobody left to collect them. That happened on 2026-08-13:
+				// the analysis broke, this job dropped the meeting minutes
+				// later, and the twenty files produced by the re-run sat
+				// undelivered until someone noticed by hand.
+				//
+				// So stay on it, backing off as with any other empty answer.
+				// The queue gives up after a fortnight either way, and a
+				// hopeless meeting costs four requests a day at the cap.
+				$this->logger->warning('{session} finished badly, still watching: {detail}',
 					['session' => $sessionId, 'detail' => $state['detail']]);
-			} else {
-				// Once, here, rather than as each file lands: a room told three
-				// times over an hour is a room that mutes the bot.
-				$this->announce((string)($meeting['token'] ?? ''), $state['artifacts']);
+				return false;
 			}
+			// Terminal and good: everything that will exist, exists.
+			// Announced once, here, rather than as each file lands: a room told
+			// three times over an hour is a room that mutes the bot.
+			$this->announce((string)($meeting['token'] ?? ''), $state['artifacts']);
 			$this->pending->done($sessionId);
 		}
 		return true;

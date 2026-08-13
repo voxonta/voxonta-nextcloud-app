@@ -102,6 +102,36 @@ class CollectArtifactsTest extends TestCase {
 		$this->collectRound($job);
 	}
 
+	public function testAFailedMeetingIsKeptInsteadOfWrittenOff(): void {
+		// 2026-08-13: an analysis broke, this job dropped the meeting minutes
+		// later, and the twenty files produced by the re-run had nobody left to
+		// collect them. A failure is not the end of the story.
+		$job = $this->job();
+		$this->pending->method('due')->willReturn($this->queued());
+		$this->gateway->method('meeting')->willReturn([
+			'status' => 'failed', 'final' => true, 'detail' => 'analysis failed', 'artifacts' => [],
+		]);
+
+		$this->pending->expects($this->never())->method('done');
+		$this->pending->expects($this->once())->method('missed')->with('s1');
+
+		$this->collectRound($job);
+	}
+
+	public function testAMeetingThatRecoveredIsAnnouncedAndClosed(): void {
+		// The same meeting on a later tick, once the re-run has succeeded.
+		$job = $this->job();
+		$this->pending->method('due')->willReturn($this->queued());
+		$this->gateway->method('meeting')->willReturn([
+			'status' => 'complete', 'final' => true, 'detail' => '', 'artifacts' => [],
+		]);
+
+		$this->pending->expects($this->once())->method('done')->with('s1');
+		$this->pending->expects($this->never())->method('missed');
+
+		$this->collectRound($job);
+	}
+
 	public function testAnAnsweringGatewayClearsTheBackoff(): void {
 		$job = $this->job();
 		$this->pending->method('due')->willReturn($this->queued());
