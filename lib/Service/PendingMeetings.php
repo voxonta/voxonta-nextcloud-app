@@ -91,6 +91,18 @@ class PendingMeetings {
 	 *
 	 * @return array<int, array<string, mixed>>
 	 */
+	/**
+	 * Session ids currently being waited for, whatever their backoff.
+	 *
+	 * Used by the sweep to tell "the gateway holds files we already know about"
+	 * from "files for a meeting this app has forgotten".
+	 *
+	 * @return array<int, string>
+	 */
+	public function knownSessions(): array {
+		return array_keys($this->all());
+	}
+
 	public function due(): array {
 		$pending = $this->all();
 		$now = $this->time->getTime();

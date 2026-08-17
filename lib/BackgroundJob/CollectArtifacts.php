@@ -68,6 +68,8 @@ class CollectArtifacts extends TimedJob {
 			return;  // no gateway set up yet — nothing to collect from
 		}
 
+		$this->adopt();
+
 		foreach (array_slice($this->pending->due(), 0, self::BATCH) as $meeting) {
 			$sessionId = (string)($meeting['session_id'] ?? '');
 			try {
@@ -85,6 +87,60 @@ class CollectArtifacts extends TimedJob {
 					'exception' => $e,
 				]);
 			}
+		}
+	}
+
+	/**
+	 * Take back meetings the gateway is holding files for and this app forgot.
+	 *
+	 * The queue here is a memory, and it can be lost: a status read as final, a
+	 * wiped config, a reinstall. Until 2026-08-17 every such loss was permanent
+	 * — the files sat in the gateway until retention deleted them, and the only
+	 * way anyone found out was a person asking why their transcript never
+	 * arrived. Eight meetings were recovered by hand that day, the oldest a
+	 * fortnight old.
+	 *
+	 * The gateway has always known, through the acked flag on every artifact.
+	 * Asking it makes that the authority instead of this list. A meeting is
+	 * adopted with the room the gateway recorded, so a forgotten meeting still
+	 * knows where its result belongs.
+	 *
+	 * Silent when there is nothing to adopt, which is the normal case.
+	 */
+	private function adopt(): void {
+		$waiting = $this->gateway->undelivered();
+		if ($waiting === []) {
+			return;
+		}
+		$known = array_flip($this->pending->knownSessions());
+
+		$adopted = 0;
+		foreach ($waiting as $meeting) {
+			if (isset($known[$meeting['session_id']])) {
+				continue;  // already being waited for, backoff and all
+			}
+			if ($meeting['room_token'] === '') {
+				// Nothing to publish into. Rare — the gateway records the room
+				// with the first frame — but guessing a room is worse than
+				// saying so and leaving the files where they are.
+				$this->logger->warning(
+					'the gateway holds files for {session} but recorded no room',
+					['session' => $meeting['session_id']]);
+				continue;
+			}
+			$this->pending->add([
+				'session_id' => $meeting['session_id'],
+				'token' => $meeting['room_token'],
+				'name' => $meeting['room_name'],
+				'type' => 2,
+			]);
+			$adopted++;
+		}
+
+		if ($adopted > 0) {
+			$this->logger->warning(
+				'took back {count} meeting(s) the gateway still had files for',
+				['count' => $adopted]);
 		}
 	}
 

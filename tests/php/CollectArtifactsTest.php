@@ -28,13 +28,21 @@ class CollectArtifactsTest extends TestCase {
 	private PendingMeetings&MockObject $pending;
 	private GatewayClient&MockObject $gateway;
 
-	private function job(): CollectArtifacts {
+	/**
+	 * @param array<int, array<string, string>> $waiting what the gateway says is
+	 *        undelivered; empty is the normal case, so most tests pass nothing
+	 * @param array<int, string> $known session ids already in the local queue
+	 */
+	private function job(array $waiting = [], array $known = []): CollectArtifacts {
 		$time = $this->createMock(ITimeFactory::class);
 		$time->method('getTime')->willReturnCallback(fn () => $this->now);
 
 		$this->pending = $this->createMock(PendingMeetings::class);
 		$this->gateway = $this->createMock(GatewayClient::class);
 		$this->gateway->method('configured')->willReturn(true);
+		// The sweep runs before every round, so every test needs an answer.
+		$this->gateway->method('undelivered')->willReturn($waiting);
+		$this->pending->method('knownSessions')->willReturn($known);
 
 		return new CollectArtifacts(
 			$time,
@@ -141,6 +149,51 @@ class CollectArtifactsTest extends TestCase {
 
 		$this->pending->expects($this->once())->method('answered')->with('s1');
 		$this->pending->expects($this->never())->method('missed');
+
+		$this->collectRound($job);
+	}
+
+	public function testAForgottenMeetingIsTakenBackFromTheGateway(): void {
+		// 2026-08-17: eight meetings had files waiting and nobody coming for
+		// them — this queue had lost every one, and it took a person asking why
+		// their transcript never arrived to find out.
+		$job = $this->job([[
+			'session_id' => 'lost-1',
+			'room_token' => 'yu32h9c3',
+			'room_name' => 'Встречи телемост',
+		]]);
+		$this->pending->method('due')->willReturn([]);
+
+		$this->pending->expects($this->once())->method('add')
+			->with($this->callback(fn (array $call) => $call['session_id'] === 'lost-1'
+				// Adopted with the room the gateway recorded: a forgotten
+				// meeting has forgotten where its result belongs.
+				&& $call['token'] === 'yu32h9c3'));
+
+		$this->collectRound($job);
+	}
+
+	public function testAMeetingAlreadyQueuedIsNotAddedTwice(): void {
+		// Otherwise every tick would reset its backoff and it would never rest.
+		$job = $this->job([[
+			'session_id' => 's1', 'room_token' => 'room', 'room_name' => 'n',
+		]], ['s1']);
+		$this->pending->method('due')->willReturn([]);
+
+		$this->pending->expects($this->never())->method('add');
+
+		$this->collectRound($job);
+	}
+
+	public function testFilesWithNoRoomAreLeftWhereTheyAre(): void {
+		// Publishing needs somewhere to publish to, and guessing a room is
+		// worse than saying nothing.
+		$job = $this->job([[
+			'session_id' => 'no-room', 'room_token' => '', 'room_name' => '',
+		]]);
+		$this->pending->method('due')->willReturn([]);
+
+		$this->pending->expects($this->never())->method('add');
 
 		$this->collectRound($job);
 	}
