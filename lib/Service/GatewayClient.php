@@ -89,6 +89,59 @@ class GatewayClient {
 	}
 
 	/**
+	 * Meetings the gateway still holds files for.
+	 *
+	 * The queue in this app is a memory, and memories are lost: a status read
+	 * as final, a wiped config, a reinstall. Every such loss used to turn
+	 * finished work into files nobody would come for — eight of them were found
+	 * by hand on 2026-08-17, the oldest a fortnight old, after someone asked why
+	 * their transcript never arrived.
+	 *
+	 * The gateway has always known, through its own acked flag. This is asking.
+	 *
+	 * @return array<int, array{session_id: string, room_token: string,
+	 *               room_name: string}> empty when nothing is waiting OR when
+	 *         the gateway cannot be reached: a sweep that fails is a sweep that
+	 *         runs again in an hour, not a reason to disturb anything.
+	 */
+	public function undelivered(): array {
+		if (!$this->configured()) {
+			return [];
+		}
+		try {
+			$response = $this->clientService->newClient()->get(
+				$this->base() . '/v1/meetings/undelivered', [
+					'headers' => ['Authorization' => 'Bearer ' . $this->token()],
+					'timeout' => self::TIMEOUT,
+				]);
+		} catch (\Throwable $e) {
+			// Includes a gateway too old to know this route. Nothing breaks:
+			// the app keeps working from its own queue exactly as before.
+			$this->logger->debug('could not ask the gateway what is undelivered: {message}',
+				['message' => $e->getMessage()]);
+			return [];
+		}
+
+		$body = json_decode((string)$response->getBody(), true);
+		$rows = is_array($body) && is_array($body['meetings'] ?? null)
+			? $body['meetings'] : [];
+
+		$out = [];
+		foreach ($rows as $row) {
+			$sessionId = (string)($row['session_id'] ?? '');
+			if ($sessionId === '') {
+				continue;
+			}
+			$out[] = [
+				'session_id' => $sessionId,
+				'room_token' => (string)($row['room_token'] ?? ''),
+				'room_name' => (string)($row['room_name'] ?? ''),
+			];
+		}
+		return $out;
+	}
+
+	/**
 	 * One file's contents. Null when it cannot be fetched — the caller keeps the
 	 * meeting pending and tries again rather than writing half of it.
 	 */
