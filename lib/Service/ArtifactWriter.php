@@ -12,6 +12,8 @@ use OCP\Files\IRootFolder;
 use OCP\Files\NotFoundException;
 use OCP\IAppConfig;
 use OCP\IURLGenerator;
+use OCP\IUserManager;
+use OCP\IUserSession;
 use OCP\Share\IManager;
 use OCP\Share\IShare;
 use Psr\Log\LoggerInterface;
@@ -57,6 +59,8 @@ class ArtifactWriter {
 		private BotAccount $botAccount,
 		private IAppConfig $appConfig,
 		private IURLGenerator $urlGenerator,
+		private IUserSession $userSession,
+		private IUserManager $userManager,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -176,24 +180,63 @@ class ArtifactWriter {
 			return;
 		}
 
-		foreach ($participants as $uid) {
-			if ($uid === '' || $uid === $owner) {
-				continue;
+		$restore = $this->signInAs($owner);
+		try {
+			foreach ($participants as $uid) {
+				if ($uid === '' || $uid === $owner) {
+					continue;
+				}
+				try {
+					$share = $this->shareManager->newShare();
+					$share->setNode($node)
+						->setShareType(IShare::TYPE_USER)
+						->setSharedWith($uid)
+						->setSharedBy($owner)
+						->setPermissions(\OCP\Constants::PERMISSION_READ);
+					$this->shareManager->createShare($share);
+				} catch (\Throwable $e) {
+					// Already shared is the common case here, and it is fine.
+					$this->logger->debug('could not share {path} with {uid}: {message}',
+						['path' => $path, 'uid' => $uid, 'message' => $e->getMessage()]);
+				}
 			}
-			try {
-				$share = $this->shareManager->newShare();
-				$share->setNode($node)
-					->setShareType(IShare::TYPE_USER)
-					->setSharedWith($uid)
-					->setSharedBy($owner)
-					->setPermissions(\OCP\Constants::PERMISSION_READ);
-				$this->shareManager->createShare($share);
-			} catch (\Throwable $e) {
-				// Already shared is the common case here, and it is fine.
-				$this->logger->debug('could not share {path} with {uid}: {message}',
-					['path' => $path, 'uid' => $uid, 'message' => $e->getMessage()]);
-			}
+		} finally {
+			$restore();
 		}
+	}
+
+	/**
+	 * Put the bot account in the session for the length of a share, and give
+	 * back the closure that undoes it.
+	 *
+	 * Nextcloud tells the recipient who shared with them — "{actor} shared
+	 * {file} with you" in their notifications and activity feed. It takes that
+	 * actor from the session, not from the share's own sharedBy, which we set
+	 * correctly. A cron job has no session, so from 2026-08-02 — the day this
+	 * app took the writing over from the service, which had been sharing over
+	 * HTTP as a signed-in user — every recipient got "  shared 09_Enriched_
+	 * Transcript.md with you" from nobody at all. 2445 shares in August, 486 in
+	 * the first four days of September, every one of them anonymous.
+	 *
+	 * The pattern is Nextcloud's own (apps/forms does the same in its
+	 * background job). One caveat comes with it: the activity app caches the
+	 * identifier the first time it is asked and holds it for the rest of the
+	 * process, so a later job in the same cron run may be attributed here. That
+	 * is a mis-naming of somebody else's activity against no name at all on
+	 * every one of ours, which is the better trade — but it is a trade, not a
+	 * clean win.
+	 */
+	private function signInAs(string $uid): \Closure {
+		$previous = $this->userSession->getUser();
+		$user = $this->userManager->get($uid);
+		if ($user === null) {
+			return static function (): void {
+			};
+		}
+		$this->userSession->setUser($user);
+		return function () use ($previous): void {
+			$this->userSession->setUser($previous);
+		};
 	}
 
 	/** Create the folder chain if it is not there yet. */

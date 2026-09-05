@@ -54,6 +54,36 @@ class TalkParticipants {
 	}
 
 	/**
+	 * Whether this is a conversation nobody can be added to — one-to-one, its
+	 * leftover after a participant is deleted, or a personal notes room. Null
+	 * when it cannot be told.
+	 *
+	 * The bot is never a member of those and there is no way to make it one:
+	 * Talk answers `room-type` to any attempt. That is worth knowing, because
+	 * it separates "this installation has a gap an administrator can close"
+	 * from "this is how Talk works" — and only the first is worth a warning.
+	 */
+	public function isClosedRoom(string $token): ?bool {
+		if (!class_exists('\OCA\Talk\Manager') || !class_exists('\OCA\Talk\Room')) {
+			return null;
+		}
+		try {
+			$type = Server::get(\OCA\Talk\Manager::class)
+				->getRoomByToken($token)->getType();
+			return in_array($type, [
+				\OCA\Talk\Room::TYPE_ONE_TO_ONE,
+				\OCA\Talk\Room::TYPE_ONE_TO_ONE_FORMER,
+				\OCA\Talk\Room::TYPE_NOTE_TO_SELF,
+			], true);
+		} catch (\Throwable $e) {
+			$this->logger->debug('could not read the type of {token}: {msg}', [
+				'token' => $token, 'msg' => $e->getMessage(),
+			]);
+			return null;
+		}
+	}
+
+	/**
 	 * The user ids of everyone in a room, for sharing a meeting's files with
 	 * them. Guests have no id and are skipped: there is nobody to share with.
 	 *

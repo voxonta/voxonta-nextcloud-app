@@ -59,30 +59,24 @@ class ChatAnnouncer {
 	}
 
 	/**
-	 * Announce a finished meeting. Returns whether the room was told.
-	 *
-	 * Failing is not worth a retry: the files are written and shared either way,
-	 * and a second attempt would as likely post twice as succeed.
+	 * Announce a finished meeting.
 	 *
 	 * @param array<string, string> $links readable name => absolute URL
 	 */
-	public function announce(string $token, array $links): bool {
+	public function announce(string $token, array $links): Announcement {
 		if ($token === '' || $links === []) {
-			return false;
+			return Announcement::Impossible;
 		}
 		$credentials = $this->botAccount->credentials();
 		if ($credentials === null) {
 			$this->logger->warning('no bot account — cannot announce {token}',
 				['token' => $token]);
-			return false;
+			return Announcement::Impossible;
 		}
 
 		if (!$this->mayPost($token, $credentials['user'])) {
-			// Not a failure: the files are shared with each participant
-			// personally, which is how a one-to-one call has always told people.
-			$this->logger->debug('not a member of {token} — nothing announced',
-				['token' => $token]);
-			return false;
+			$this->reportAbsence($token, $credentials['user']);
+			return Announcement::Impossible;
 		}
 
 		try {
@@ -98,16 +92,41 @@ class ChatAnnouncer {
 					'timeout' => self::TIMEOUT,
 				]);
 		} catch (\Throwable $e) {
-			// The common cause is the bot not being a participant of that room
-			// any more — a conversation it was removed from after the call.
 			$this->logger->warning('could not announce in {token}: {message}',
 				['token' => $token, 'message' => $e->getMessage()]);
-			return false;
+			return Announcement::Failed;
 		}
 
 		$this->logger->info('announced {count} file(s) in {token}',
 			['count' => count($links), 'token' => $token]);
-		return true;
+		return Announcement::Posted;
+	}
+
+	/**
+	 * Say — or deliberately not say — that the bot is not in a conversation it
+	 * was meant to announce in.
+	 *
+	 * In a one-to-one room this is how Talk works: the bot hears the call
+	 * through the signalling server and can never be a member, so a line per
+	 * meeting would be noise around something nobody can fix.
+	 *
+	 * A group conversation is the opposite. Somebody simply never added the
+	 * account, and until 2026-09-04 that was written at debug level, which on a
+	 * production instance means not written at all. Two conversations had been
+	 * losing every result for weeks; it took a person asking why their
+	 * transcript never arrived to find out, and the journal had nothing. The
+	 * fix is one occ command, but only if anyone knows to run it.
+	 */
+	private function reportAbsence(string $token, string $botUser): void {
+		if ($this->participants->isClosedRoom($token) !== false) {
+			$this->logger->debug('not a member of {token} — nothing announced',
+				['token' => $token]);
+			return;
+		}
+		$this->logger->warning(
+			'{bot} is not in conversation {token}, so its meeting results are not'
+			. ' announced there; add it with: occ talk:room:add --user {bot} {token}',
+			['bot' => $botUser, 'token' => $token]);
 	}
 
 	/** @param array<string, string> $links */

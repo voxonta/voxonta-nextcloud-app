@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\Voxonta\BackgroundJob;
 
+use OCA\Voxonta\Service\Announcement;
 use OCA\Voxonta\Service\ArtifactWriter;
 use OCA\Voxonta\Service\ChatAnnouncer;
 use OCA\Voxonta\Service\GatewayClient;
@@ -216,7 +217,14 @@ class CollectArtifacts extends TimedJob {
 			// Terminal and good: everything that will exist, exists.
 			// Announced once, here, rather than as each file lands: a room told
 			// three times over an hour is a room that mutes the bot.
-			$this->announce((string)($meeting['token'] ?? ''), $state['artifacts']);
+			if ($this->announce((string)($meeting['token'] ?? ''),
+					$state['artifacts']) === Announcement::Failed) {
+				// The files are ours and the meeting is finished, but nobody has
+				// been told and another tick might manage it. Closing here would
+				// make a moment's trouble reaching the chat API permanent — the
+				// meeting leaves the queue and no later run ever announces it.
+				return false;
+			}
 			$this->pending->done($sessionId);
 		}
 		return true;
@@ -245,9 +253,11 @@ class CollectArtifacts extends TimedJob {
 	 *
 	 * @param array<int, array<string, mixed>> $artifacts
 	 */
-	private function announce(string $token, array $artifacts): void {
+	private function announce(string $token, array $artifacts): Announcement {
 		if ($token === '' || !$this->writer->publishesToChat()) {
-			return;
+			// Nothing to announce into, or an installation that has turned
+			// announcing off. Either way the meeting is done with.
+			return Announcement::Impossible;
 		}
 
 		$labels = [
@@ -266,7 +276,7 @@ class CollectArtifacts extends TimedJob {
 			}
 		}
 
-		$this->announcer->announce($token, $links);
+		return $this->announcer->announce($token, $links);
 	}
 
 	/**

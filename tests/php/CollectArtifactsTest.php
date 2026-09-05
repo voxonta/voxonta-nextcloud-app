@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\Voxonta\Tests;
 
 use OCA\Voxonta\BackgroundJob\CollectArtifacts;
+use OCA\Voxonta\Service\Announcement;
 use OCA\Voxonta\Service\ArtifactWriter;
 use OCA\Voxonta\Service\ChatAnnouncer;
 use OCA\Voxonta\Service\GatewayClient;
@@ -27,6 +28,7 @@ class CollectArtifactsTest extends TestCase {
 	private int $now = 1_000_000;
 	private PendingMeetings&MockObject $pending;
 	private GatewayClient&MockObject $gateway;
+	private Announcement $announcement = Announcement::Posted;
 
 	/**
 	 * @param array<int, array<string, string>> $waiting what the gateway says is
@@ -44,12 +46,19 @@ class CollectArtifactsTest extends TestCase {
 		$this->gateway->method('undelivered')->willReturn($waiting);
 		$this->pending->method('knownSessions')->willReturn($known);
 
+		$writer = $this->createMock(ArtifactWriter::class);
+		$writer->method('publishesToChat')->willReturn(true);
+		$writer->method('linkTo')->willReturn('https://cloud.example/f/1');
+
+		$announcer = $this->createMock(ChatAnnouncer::class);
+		$announcer->method('announce')->willReturnCallback(fn () => $this->announcement);
+
 		return new CollectArtifacts(
 			$time,
 			$this->pending,
 			$this->gateway,
-			$this->createMock(ArtifactWriter::class),
-			$this->createMock(ChatAnnouncer::class),
+			$writer,
+			$announcer,
 			$this->createMock(TalkParticipants::class),
 			$this->createMock(IL10N::class),
 			$this->createMock(LoggerInterface::class),
@@ -181,6 +190,40 @@ class CollectArtifactsTest extends TestCase {
 		$this->pending->method('due')->willReturn([]);
 
 		$this->pending->expects($this->never())->method('add');
+
+		$this->collectRound($job);
+	}
+
+	public function testAMeetingNobodyCouldBeToldAboutStaysInTheQueue(): void {
+		// Files collected, meeting finished, and the chat API did not answer.
+		// Closing here would make a moment's trouble permanent: the entry leaves
+		// the queue and no later tick ever announces it.
+		$this->announcement = Announcement::Failed;
+		$job = $this->job();
+		$this->pending->method('due')->willReturn($this->queued());
+		$this->gateway->method('meeting')->willReturn([
+			'status' => 'complete', 'final' => true, 'detail' => '', 'artifacts' => [],
+		]);
+
+		$this->pending->expects($this->never())->method('done');
+		$this->pending->expects($this->once())->method('missed')->with('s1');
+
+		$this->collectRound($job);
+	}
+
+	public function testAMeetingThatCanNeverBeAnnouncedIsStillClosed(): void {
+		// A one-to-one room, an installation with announcing switched off, a
+		// conversation the bot is not in: the room will not be told today or in
+		// a fortnight, and holding the entry open only starves the queue.
+		$this->announcement = Announcement::Impossible;
+		$job = $this->job();
+		$this->pending->method('due')->willReturn($this->queued());
+		$this->gateway->method('meeting')->willReturn([
+			'status' => 'complete', 'final' => true, 'detail' => '', 'artifacts' => [],
+		]);
+
+		$this->pending->expects($this->once())->method('done')->with('s1');
+		$this->pending->expects($this->never())->method('missed');
 
 		$this->collectRound($job);
 	}
