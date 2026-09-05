@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\Voxonta\Tests;
 
+use OCA\Voxonta\Service\Announcement;
 use OCA\Voxonta\Service\BotAccount;
 use OCA\Voxonta\Service\ChatAnnouncer;
 use OCA\Voxonta\Service\TalkParticipants;
@@ -27,10 +28,18 @@ class ChatAnnouncerTest extends TestCase {
 	private array $posted = [];
 	/** @var array<int, string> */
 	private array $members = [];
+	/** @var array<int, string> */
+	private array $warnings = [];
+	/** Whether Talk says this is a room nobody can be added to; null = unknown. */
+	private ?bool $closedRoom = null;
+	private bool $postThrows = false;
 
 	private function announcer(): ChatAnnouncer {
 		$client = $this->createMock(IClient::class);
 		$client->method('post')->willReturnCallback(function (string $url) {
+			if ($this->postThrows) {
+				throw new \RuntimeException('connection reset');
+			}
 			$this->posted[] = $url;
 			return $this->createMock(\OCP\Http\Client\IResponse::class);
 		});
@@ -42,6 +51,7 @@ class ChatAnnouncerTest extends TestCase {
 
 		$participants = $this->createMock(TalkParticipants::class);
 		$participants->method('userIds')->willReturnCallback(fn () => $this->members);
+		$participants->method('isClosedRoom')->willReturnCallback(fn () => $this->closedRoom);
 
 		$urls = $this->createMock(IURLGenerator::class);
 		$urls->method('getAbsoluteURL')->willReturnCallback(
@@ -50,27 +60,47 @@ class ChatAnnouncerTest extends TestCase {
 		$l10n = $this->createMock(IL10N::class);
 		$l10n->method('t')->willReturnCallback(static fn (string $text) => $text);
 
+		$logger = $this->createMock(LoggerInterface::class);
+		$logger->method('warning')->willReturnCallback(
+			function (string|\Stringable $message): void {
+				$this->warnings[] = (string)$message;
+			});
+
 		return new ChatAnnouncer($clientService, $bot, $participants, $urls, $l10n,
-			$this->createMock(LoggerInterface::class));
+			$logger);
 	}
 
 	private const LINKS = ['Summary' => 'https://cloud.example/f/1'];
 
 	public function testSaysNothingInAOneToOneRoomItCannotJoin(): void {
 		$this->members = ['admin', 'vadim.k'];  // the bot is not — and cannot be — here
+		$this->closedRoom = true;
 
-		$told = $this->announcer()->announce('room', self::LINKS);
-
-		$this->assertFalse($told);
+		$this->assertSame(Announcement::Impossible,
+			$this->announcer()->announce('room', self::LINKS));
 		$this->assertSame([], $this->posted, 'posted into a room it is not in');
+		$this->assertSame([], $this->warnings, 'warned about how Talk works');
+	}
+
+	public function testAGroupRoomWithoutTheBotIsWorthSayingOutLoud(): void {
+		// 2026-09-04: two group conversations had been losing every result for
+		// weeks because nobody had added the account. This was debug level, so
+		// production wrote nothing at all and it took a complaint to find.
+		$this->members = ['anatoliy.h', 'vadim.k'];
+		$this->closedRoom = false;
+
+		$this->assertSame(Announcement::Impossible,
+			$this->announcer()->announce('nhm29rr9', self::LINKS));
+		$this->assertCount(1, $this->warnings);
+		$this->assertStringContainsString('talk:room:add', $this->warnings[0],
+			'a warning nobody can act on is only noise');
 	}
 
 	public function testPostsWhereItIsAMember(): void {
 		$this->members = ['admin', 'vadim.k', 'transcriber'];
 
-		$told = $this->announcer()->announce('room', self::LINKS);
-
-		$this->assertTrue($told);
+		$this->assertSame(Announcement::Posted,
+			$this->announcer()->announce('room', self::LINKS));
 		$this->assertCount(1, $this->posted);
 		$this->assertStringContainsString('/chat/room', $this->posted[0]);
 	}
@@ -80,16 +110,26 @@ class ChatAnnouncerTest extends TestCase {
 		// refusing to post on that would silently stop announcements altogether.
 		$this->members = [];
 
-		$told = $this->announcer()->announce('room', self::LINKS);
-
-		$this->assertTrue($told);
+		$this->assertSame(Announcement::Posted,
+			$this->announcer()->announce('room', self::LINKS));
 		$this->assertCount(1, $this->posted);
 	}
 
 	public function testNothingToLinkIsNotAnnounced(): void {
 		$this->members = ['transcriber'];
 
-		$this->assertFalse($this->announcer()->announce('room', []));
+		$this->assertSame(Announcement::Impossible,
+			$this->announcer()->announce('room', []));
 		$this->assertSame([], $this->posted);
+	}
+
+	public function testABrokenAttemptIsWorthRepeating(): void {
+		// The room is reachable and the bot belongs there; the chat API simply
+		// did not answer. Reading that as "done" loses the announcement for good.
+		$this->members = ['transcriber'];
+		$this->postThrows = true;
+
+		$this->assertSame(Announcement::Failed,
+			$this->announcer()->announce('room', self::LINKS));
 	}
 }

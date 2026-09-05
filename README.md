@@ -64,8 +64,11 @@ No Docker and no AppAPI are needed for the app itself.
        --feature event --feature response
    ```
 
-   The secret is unused for an in-app bot — Talk requires the argument — but it
-   should still be random.
+   Keep the secret random and keep it. It was described here as unused for an
+   in-app bot; that is wrong. Talk's `POST /bot/{token}/message` authenticates
+   by a signature over this secret and does not care that the bot lives inside
+   an app — which is the one way to post into a conversation the bot account is
+   not, and cannot be, a member of. Nothing uses it yet.
 
 4. Open **Administration settings → Voxonta** and enter the address and token of
    your transcription service.
