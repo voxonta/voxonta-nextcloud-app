@@ -63,6 +63,22 @@ class FileArchive {
 	private const ANALYSIS_TRANSCRIPT = '10_Original_Transcript';
 
 	/**
+	 * The transcript a person actually reads, and only that.
+	 *
+	 * Since 2026-08-02 this is the file the service shares beside the summary:
+	 * recognition already broken into sentences by the analysis. It is **not**
+	 * listed as a call of its own, and the difference matters — its front
+	 * matter carries `entities`, `speakers` and `meeting_name`, but no `date`,
+	 * no `participants` and no `started_at`. Treating it as a call the way
+	 * 10_Original is treated cost 119 of one person's 188 meetings before the
+	 * attempt was reverted: the header it needs simply is not in there.
+	 *
+	 * So the summary stays the call and keeps the metadata; this is the body
+	 * hanging off it.
+	 */
+	private const ANALYSIS_BODY = '09_Enriched_Transcript';
+
+	/**
 	 * Where a call sits in the analyser's tree: ".../2026-07-21/004_status-…".
 	 * The date orders the archive and answers a date filter, and the number
 	 * orders the calls within a day — neither is in the recipient's filename.
@@ -188,6 +204,12 @@ class FileArchive {
 			$scanned++;
 			$meta = $this->metadataFor($userId, $entry);
 			if ($meta !== null) {
+				// Whether a transcript can be opened is a fact about the folder,
+				// not about the summary's own header — so it is answered here,
+				// where the other files of the meeting are in reach.
+				if (empty($meta['has_transcript'])) {
+					$meta['has_transcript'] = $this->bodyFile($userId, $entry) !== null;
+				}
 				$meetings[] = $meta;
 				$day = $this->day($entry);
 			}
@@ -286,13 +308,39 @@ class FileArchive {
 	/**
 	 * @throws BackendException
 	 */
+	/**
+	 * The readable transcript sitting beside a summary, if one was shared.
+	 *
+	 * Paired by the meeting folder from the file index, never by name: a
+	 * recipient's copies are all flat in Shares/ as "09_Enriched_Transcript
+	 * (188).md", so matching on names would hand somebody another call's words.
+	 *
+	 * @param array<string, mixed> $entry
+	 */
+	private function bodyFile(string $userId, array $entry): ?File {
+		$folder = $entry['folder'] ?? 0;
+		if ($folder === 0) {
+			return null;
+		}
+		foreach ($this->candidates($userId) as $other) {
+			if (($other['folder'] ?? 0) === $folder
+				&& str_starts_with((string)$other['name'], self::ANALYSIS_BODY)) {
+				return $this->resolve($userId, $other);
+			}
+		}
+		return null;
+	}
+
 	public function transcript(string $userId, string $sessionId): string {
 		$file = $this->fileFor($userId, $sessionId);
 
-		// A summary standing in for a call has no transcript behind it — and
-		// returning the summary again here would read as one.
+		// A summary is not a transcript, and returning it here would read as
+		// one. But since 2026-08-02 the transcript is a separate file in the
+		// same folder, so look there before giving up.
 		if (str_starts_with($file->getName(), self::ANALYSIS_SUMMARY)) {
-			return '';
+			$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
+			$body = $entry === null ? null : $this->bodyFile($userId, $entry);
+			return $body === null ? '' : $this->contents($body);
 		}
 		return $this->contents($file);
 	}
@@ -837,8 +885,12 @@ class FileArchive {
 	private function annotateAnalysis(array &$entries): void {
 		$wanted = [];
 		foreach ($entries as $id => $entry) {
+			// The body too, or it has no folder and nothing to pair it with —
+			// which is exactly how the transcript went missing from meetings
+			// that were holding it all along.
 			if (str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)
-				|| str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)) {
+				|| str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)
+				|| str_starts_with($entry['name'], self::ANALYSIS_BODY)) {
 				$wanted[$id] = true;
 			}
 		}

@@ -615,6 +615,43 @@ class FileArchiveTest extends TestCase {
 			'встреча пропала из-за разрезанной буквы');
 	}
 
+	public function testTheSummaryOffersTheTranscriptSharedBesideIt(): void {
+		// Since 2026-08-02 the service shares 09_Enriched_Transcript, which this
+		// file did not know about: the meeting listed as summary-only and the
+		// "Download transcript" button was hidden for 349 of one person's 388
+		// calls. The summary is still the call — the transcript hangs off it.
+		$folder = $this->meetingFolder(7, '2026-07-20', '004');
+		$archive = $this->archive([
+			'01_Executive_Summary.md' => self::SUMMARY_ALONE,
+			'09_Enriched_Transcript.md' => "---\nmeeting_name: ППортал • Дейли\n---\n\nслова\n",
+		], index: [
+			'01_Executive_Summary.md' => $folder,
+			'09_Enriched_Transcript.md' => $folder,
+		]);
+
+		$meetings = $archive->list('alice')['meetings'];
+		$this->assertCount(1, $meetings, 'встреча по-прежнему одна, а не две');
+		$this->assertTrue($meetings[0]['has_transcript'],
+			'кнопка скачивания скрыта, хотя транскрипт рядом');
+		$this->assertStringContainsString('слова',
+			$archive->transcript('alice', $meetings[0]['session_id']));
+	}
+
+	public function testASummaryWithoutATranscriptStillSaysSo(): void {
+		// The months before the transcript was shared: nothing to offer, and
+		// promising a download that returns the summary again would be worse
+		// than the button being absent.
+		$archive = $this->archive(
+			['01_Executive_Summary.md' => self::SUMMARY_ALONE],
+			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$meetings = $archive->list('alice')['meetings'];
+		$this->assertCount(1, $meetings);
+		$this->assertFalse($meetings[0]['has_transcript']);
+		$this->assertSame('', $archive->transcript('alice', $meetings[0]['session_id']));
+	}
+
 	public function testTheOtherAnalysisFilesAreNotCalls(): void {
 		// Never shared in practice, but a folder shared by hand would bring them
 		// along, and only two of the dozen stand for a call.
