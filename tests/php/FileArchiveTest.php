@@ -570,6 +570,51 @@ class FileArchiveTest extends TestCase {
 		$this->assertSame([], $archive->list('alice', 50, 0, 'Superset')['meetings']);
 	}
 
+	public function testALongParticipantListStillParses(): void {
+		// The analyser lists participants in the same YAML block, and on the
+		// production archive that block runs to 8182 bytes — 111 of 120
+		// measured were longer than the 2048 this used to read. A header cut
+		// before its closing `---` is a call with no people and no name.
+		$many = "---\ndate: 2026-07-20\nduration: 19 min\n"
+			. "finished_at: 2026-07-20 06:50:33+00:00\n"
+			. "meeting_name: ППортал • Дейли\nparticipants:\n";
+		for ($i = 0; $i < 400; $i++) {
+			$many .= "- Участник Номер Такой-то $i\n";
+		}
+		$many .= "source_file: \"2026-07-20 09-31-08 - ППортал • Дейли.md\"\n---\n\n"
+			. "[00:05] **Александр Лимонов:** начнём\n";
+		$this->assertGreaterThan(2048, strlen($many), 'фикстура должна быть длиннее прежнего куска');
+
+		$archive = $this->archive(
+			['10_Original_Transcript.md' => $many],
+			index: ['10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$meetings = $archive->list('alice')['meetings'];
+		$this->assertCount(1, $meetings);
+		$this->assertSame('ППортал • Дейли', $meetings[0]['room_name'],
+			'заголовок оборвался до закрывающего ---');
+		$this->assertCount(400, $meetings[0]['participants']);
+	}
+
+	public function testACharacterSplitByTheReadDoesNotHideTheCall(): void {
+		// preg_match with /u returns false on invalid UTF-8, not "no match",
+		// and the callers read that as "not a call". A read stopping between
+		// the two bytes of a Cyrillic letter therefore erased the meeting —
+		// 1542 of 10028 cached headers were that empty answer.
+		$pad = str_repeat('я', 100000);
+		$text = "---\nmeeting_date: '2026-07-20'\nnote: $pad\n---\n\n"
+			. "# Executive Summary: Длинная встреча (Пн, 20 июля 2026)\n";
+
+		$archive = $this->archive(
+			['01_Executive_Summary.md' => $text],
+			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$this->assertCount(1, $archive->list('alice')['meetings'],
+			'встреча пропала из-за разрезанной буквы');
+	}
+
 	public function testTheOtherAnalysisFilesAreNotCalls(): void {
 		// Never shared in practice, but a folder shared by hand would bring them
 		// along, and only two of the dozen stand for a call.

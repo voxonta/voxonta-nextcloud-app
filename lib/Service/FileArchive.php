@@ -89,6 +89,14 @@ class FileArchive {
 	 * makes Nextcloud drop the name filter and return every markdown file, so a
 	 * large finite number is used instead — well past any real archive.
 	 */
+	/**
+	 * How much of a file to take per read, and where to stop asking. The chunk
+	 * covers every header measured on the production archive — 8182 bytes at
+	 * the worst; the cap is the answer to a file that is not what it claims.
+	 */
+	private const HEAD_CHUNK = 16384;
+	private const HEAD_MAX = 131072;
+
 	private const MAX_RESULTS = 100000;
 
 	/**
@@ -1213,21 +1221,73 @@ class FileArchive {
 		];
 	}
 
+	/**
+	 * Enough of a file's start to say what the call was.
+	 *
+	 * Read to the end of the header rather than to a fixed offset. A summary's
+	 * ends by byte 244 at the worst measured, but an enriched transcript lists
+	 * its participants in the same YAML block and runs to 8182 — a flat 2048
+	 * cut 111 of 120 of them short of the closing `---`, losing the people and
+	 * the meeting's name with it. One read covers everything seen so far; the
+	 * loop is for the day somebody holds a call with fifty people.
+	 */
 	private function head(File $file): ?string {
 		try {
 			$handle = $file->fopen('r');
 			if ($handle === false) {
 				return null;
 			}
-			$head = fread($handle, 2048);
+			$head = '';
+			do {
+				$chunk = fread($handle, self::HEAD_CHUNK);
+				if (!is_string($chunk) || $chunk === '') {
+					break;
+				}
+				$head .= $chunk;
+			} while (strlen($head) < self::HEAD_MAX && !$this->headerEnded($head));
 			fclose($handle);
-			return is_string($head) ? $head : null;
+			return $head === '' ? null : $this->wholeCharacters($head);
 		} catch (\Throwable $e) {
 			$this->logger->warning('could not read a transcript header', [
 				'exception' => $e,
 			]);
 			return null;
 		}
+	}
+
+	/** Whether a YAML front matter block has closed — or was never opened. */
+	private function headerEnded(string $head): bool {
+		return !str_starts_with($head, '---')
+			|| strpos($head, "\n---", 3) !== false;
+	}
+
+	/**
+	 * The same text with a half-read character dropped from the end.
+	 *
+	 * Every pattern that reads these headers carries /u, and on invalid UTF-8
+	 * preg_match returns **false** rather than "no match". The callers test
+	 * `!== 1`, so a read that stopped between the two bytes of a Cyrillic
+	 * letter was indistinguishable from "this is not a call" — and the meeting
+	 * left the archive. 1542 of 10028 cached headers held that empty answer,
+	 * and people reported seeing some of their meetings and not others with no
+	 * pattern to it, because there is none: it depends on where the byte fell.
+	 *
+	 * Kept even though the reader above now stops at the header's own end. The
+	 * cap can still bite, and a guard costing one call is cheaper than learning
+	 * about it again from someone who cannot find their meeting.
+	 */
+	private function wholeCharacters(string $text): string {
+		if (mb_check_encoding($text, 'UTF-8')) {
+			return $text;
+		}
+		// Back over the continuation bytes (10xxxxxx) to the lead byte that
+		// began the truncated sequence, and drop from there.
+		for ($i = strlen($text) - 1, $stop = max(0, $i - 3); $i >= $stop; $i--) {
+			if ((ord($text[$i]) & 0xC0) !== 0x80) {
+				return substr($text, 0, $i);
+			}
+		}
+		return $text;
 	}
 
 	/**
