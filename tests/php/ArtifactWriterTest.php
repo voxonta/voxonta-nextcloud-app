@@ -30,6 +30,8 @@ use Psr\Log\LoggerInterface;
 class ArtifactWriterTest extends TestCase {
 	/** Who the session held at each createShare call, in order. */
 	private array $actors = [];
+	/** Who the session held when the file was created — the first activity. */
+	private array $creators = [];
 	private ?IUser $sessionUser = null;
 	private bool $shareThrows = false;
 
@@ -92,8 +94,10 @@ class ArtifactWriterTest extends TestCase {
 		$folder = $this->createMock(Folder::class);
 		$folder->method('nodeExists')->willReturn(false);
 		$folder->method('newFolder')->willReturnCallback(fn () => $folder);
-		$folder->method('newFile')->willReturnCallback(
-			fn () => $this->createMock(File::class));
+		$folder->method('newFile')->willReturnCallback(function () {
+			$this->creators[] = $this->sessionUser?->getUID();
+			return $this->createMock(File::class);
+		});
 		$folder->method('get')->willReturnCallback(
 			fn () => $this->createMock(File::class));
 
@@ -116,6 +120,20 @@ class ArtifactWriterTest extends TestCase {
 		$this->assertTrue($this->writeOne($writer));
 		// Both recipients, both named — this is the whole point of the fix.
 		$this->assertSame(['transcriber', 'transcriber'], $this->actors);
+	}
+
+	public function testTheFileIsCreatedUnderTheBotAccountToo(): void {
+		// The one that matters, and the one the 2026-09-05 fix missed. Creating
+		// the file is an activity of its own and it happens first; the activity
+		// app asks who did it once and keeps that answer for the whole process.
+		// Sign in only for the share and the blank is already cached — which is
+		// how a shipped fix changed nothing for three weeks.
+		$writer = $this->writer($this->bot());
+
+		$this->writeOne($writer);
+
+		$this->assertSame(['transcriber'], $this->creators,
+			'подмена опоздала на шаг: файл создан до входа в учётку');
 	}
 
 	public function testTheSessionIsGivenBackAfterwards(): void {
