@@ -63,6 +63,22 @@ class FileArchive {
 	private const ANALYSIS_TRANSCRIPT = '10_Original_Transcript';
 
 	/**
+	 * The transcript a person actually reads, and only that.
+	 *
+	 * Since 2026-08-02 this is the file the service shares beside the summary:
+	 * recognition already broken into sentences by the analysis. It is **not**
+	 * listed as a call of its own, and the difference matters — its front
+	 * matter carries `entities`, `speakers` and `meeting_name`, but no `date`,
+	 * no `participants` and no `started_at`. Treating it as a call the way
+	 * 10_Original is treated cost 119 of one person's 188 meetings before the
+	 * attempt was reverted: the header it needs simply is not in there.
+	 *
+	 * So the summary stays the call and keeps the metadata; this is the body
+	 * hanging off it.
+	 */
+	private const ANALYSIS_BODY = '09_Enriched_Transcript';
+
+	/**
 	 * Where a call sits in the analyser's tree: ".../2026-07-21/004_status-…".
 	 * The date orders the archive and answers a date filter, and the number
 	 * orders the calls within a day — neither is in the recipient's filename.
@@ -89,6 +105,14 @@ class FileArchive {
 	 * makes Nextcloud drop the name filter and return every markdown file, so a
 	 * large finite number is used instead — well past any real archive.
 	 */
+	/**
+	 * How much of a file to take per read, and where to stop asking. The chunk
+	 * covers every header measured on the production archive — 8182 bytes at
+	 * the worst; the cap is the answer to a file that is not what it claims.
+	 */
+	private const HEAD_CHUNK = 16384;
+	private const HEAD_MAX = 131072;
+
 	private const MAX_RESULTS = 100000;
 
 	/**
@@ -180,6 +204,12 @@ class FileArchive {
 			$scanned++;
 			$meta = $this->metadataFor($userId, $entry);
 			if ($meta !== null) {
+				// Whether a transcript can be opened is a fact about the folder,
+				// not about the summary's own header — so it is answered here,
+				// where the other files of the meeting are in reach.
+				if (empty($meta['has_transcript'])) {
+					$meta['has_transcript'] = $this->bodyFile($userId, $entry) !== null;
+				}
 				$meetings[] = $meta;
 				$day = $this->day($entry);
 			}
@@ -278,13 +308,39 @@ class FileArchive {
 	/**
 	 * @throws BackendException
 	 */
+	/**
+	 * The readable transcript sitting beside a summary, if one was shared.
+	 *
+	 * Paired by the meeting folder from the file index, never by name: a
+	 * recipient's copies are all flat in Shares/ as "09_Enriched_Transcript
+	 * (188).md", so matching on names would hand somebody another call's words.
+	 *
+	 * @param array<string, mixed> $entry
+	 */
+	private function bodyFile(string $userId, array $entry): ?File {
+		$folder = $entry['folder'] ?? 0;
+		if ($folder === 0) {
+			return null;
+		}
+		foreach ($this->candidates($userId) as $other) {
+			if (($other['folder'] ?? 0) === $folder
+				&& str_starts_with((string)$other['name'], self::ANALYSIS_BODY)) {
+				return $this->resolve($userId, $other);
+			}
+		}
+		return null;
+	}
+
 	public function transcript(string $userId, string $sessionId): string {
 		$file = $this->fileFor($userId, $sessionId);
 
-		// A summary standing in for a call has no transcript behind it — and
-		// returning the summary again here would read as one.
+		// A summary is not a transcript, and returning it here would read as
+		// one. But since 2026-08-02 the transcript is a separate file in the
+		// same folder, so look there before giving up.
 		if (str_starts_with($file->getName(), self::ANALYSIS_SUMMARY)) {
-			return '';
+			$entry = $this->candidates($userId)[(int)$sessionId] ?? null;
+			$body = $entry === null ? null : $this->bodyFile($userId, $entry);
+			return $body === null ? '' : $this->contents($body);
 		}
 		return $this->contents($file);
 	}
@@ -829,8 +885,12 @@ class FileArchive {
 	private function annotateAnalysis(array &$entries): void {
 		$wanted = [];
 		foreach ($entries as $id => $entry) {
+			// The body too, or it has no folder and nothing to pair it with —
+			// which is exactly how the transcript went missing from meetings
+			// that were holding it all along.
 			if (str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)
-				|| str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)) {
+				|| str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)
+				|| str_starts_with($entry['name'], self::ANALYSIS_BODY)) {
 				$wanted[$id] = true;
 			}
 		}
@@ -1213,21 +1273,73 @@ class FileArchive {
 		];
 	}
 
+	/**
+	 * Enough of a file's start to say what the call was.
+	 *
+	 * Read to the end of the header rather than to a fixed offset. A summary's
+	 * ends by byte 244 at the worst measured, but an enriched transcript lists
+	 * its participants in the same YAML block and runs to 8182 — a flat 2048
+	 * cut 111 of 120 of them short of the closing `---`, losing the people and
+	 * the meeting's name with it. One read covers everything seen so far; the
+	 * loop is for the day somebody holds a call with fifty people.
+	 */
 	private function head(File $file): ?string {
 		try {
 			$handle = $file->fopen('r');
 			if ($handle === false) {
 				return null;
 			}
-			$head = fread($handle, 2048);
+			$head = '';
+			do {
+				$chunk = fread($handle, self::HEAD_CHUNK);
+				if (!is_string($chunk) || $chunk === '') {
+					break;
+				}
+				$head .= $chunk;
+			} while (strlen($head) < self::HEAD_MAX && !$this->headerEnded($head));
 			fclose($handle);
-			return is_string($head) ? $head : null;
+			return $head === '' ? null : $this->wholeCharacters($head);
 		} catch (\Throwable $e) {
 			$this->logger->warning('could not read a transcript header', [
 				'exception' => $e,
 			]);
 			return null;
 		}
+	}
+
+	/** Whether a YAML front matter block has closed — or was never opened. */
+	private function headerEnded(string $head): bool {
+		return !str_starts_with($head, '---')
+			|| strpos($head, "\n---", 3) !== false;
+	}
+
+	/**
+	 * The same text with a half-read character dropped from the end.
+	 *
+	 * Every pattern that reads these headers carries /u, and on invalid UTF-8
+	 * preg_match returns **false** rather than "no match". The callers test
+	 * `!== 1`, so a read that stopped between the two bytes of a Cyrillic
+	 * letter was indistinguishable from "this is not a call" — and the meeting
+	 * left the archive. 1542 of 10028 cached headers held that empty answer,
+	 * and people reported seeing some of their meetings and not others with no
+	 * pattern to it, because there is none: it depends on where the byte fell.
+	 *
+	 * Kept even though the reader above now stops at the header's own end. The
+	 * cap can still bite, and a guard costing one call is cheaper than learning
+	 * about it again from someone who cannot find their meeting.
+	 */
+	private function wholeCharacters(string $text): string {
+		if (mb_check_encoding($text, 'UTF-8')) {
+			return $text;
+		}
+		// Back over the continuation bytes (10xxxxxx) to the lead byte that
+		// began the truncated sequence, and drop from there.
+		for ($i = strlen($text) - 1, $stop = max(0, $i - 3); $i >= $stop; $i--) {
+			if ((ord($text[$i]) & 0xC0) !== 0x80) {
+				return substr($text, 0, $i);
+			}
+		}
+		return $text;
 	}
 
 	/**
