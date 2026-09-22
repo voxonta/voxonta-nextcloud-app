@@ -98,26 +98,36 @@ class ArtifactWriter {
 
 		$relative = $this->folderFor($kind) . '/' . $name;
 
+		// Signed in for the whole of it, creation included — see signInAs().
+		// Wrapping only the share was the 2026-09-05 version of this fix, and it
+		// missed by one step: the file is created first, that creation is itself
+		// an activity, and whoever asks first fixes the name for the rest of the
+		// process. Both ended up attributed to nobody.
+		$restore = $this->signInAs($uid);
 		try {
-			$userFolder = $this->rootFolder->getUserFolder($uid);
-			if ($userFolder->nodeExists($relative)) {
-				// Already there. Not an error and not something to redo: a file
-				// named for a meeting is that meeting's.
-				return true;
+			try {
+				$userFolder = $this->rootFolder->getUserFolder($uid);
+				if ($userFolder->nodeExists($relative)) {
+					// Already there. Not an error and not something to redo: a
+					// file named for a meeting is that meeting's.
+					return true;
+				}
+				$folder = $this->folderAt($userFolder, dirname($relative));
+				$folder->newFile(basename($relative), $content);
+			} catch (\Throwable $e) {
+				$this->logger->error('could not write {path}: {message}',
+					['path' => $relative, 'message' => $e->getMessage()]);
+				return false;
 			}
-			$folder = $this->folderAt($userFolder, dirname($relative));
-			$folder->newFile(basename($relative), $content);
-		} catch (\Throwable $e) {
-			$this->logger->error('could not write {path}: {message}',
-				['path' => $relative, 'message' => $e->getMessage()]);
-			return false;
-		}
 
-		$this->logger->info('wrote {path}', ['path' => $relative]);
-		if ($this->shouldShare($kind, $name)) {
-			$this->share($uid, $relative, $participants);
+			$this->logger->info('wrote {path}', ['path' => $relative]);
+			if ($this->shouldShare($kind, $name)) {
+				$this->share($uid, $relative, $participants);
+			}
+			return true;
+		} finally {
+			$restore();
 		}
-		return true;
 	}
 
 	private function shouldShare(string $kind, string $name): bool {
@@ -180,51 +190,52 @@ class ArtifactWriter {
 			return;
 		}
 
-		$restore = $this->signInAs($owner);
-		try {
-			foreach ($participants as $uid) {
-				if ($uid === '' || $uid === $owner) {
-					continue;
-				}
-				try {
-					$share = $this->shareManager->newShare();
-					$share->setNode($node)
-						->setShareType(IShare::TYPE_USER)
-						->setSharedWith($uid)
-						->setSharedBy($owner)
-						->setPermissions(\OCP\Constants::PERMISSION_READ);
-					$this->shareManager->createShare($share);
-				} catch (\Throwable $e) {
-					// Already shared is the common case here, and it is fine.
-					$this->logger->debug('could not share {path} with {uid}: {message}',
-						['path' => $path, 'uid' => $uid, 'message' => $e->getMessage()]);
-				}
+		// No sign-in here: write() already holds it for the whole sequence.
+		foreach ($participants as $uid) {
+			if ($uid === '' || $uid === $owner) {
+				continue;
 			}
-		} finally {
-			$restore();
+			try {
+				$share = $this->shareManager->newShare();
+				$share->setNode($node)
+					->setShareType(IShare::TYPE_USER)
+					->setSharedWith($uid)
+					->setSharedBy($owner)
+					->setPermissions(\OCP\Constants::PERMISSION_READ);
+				$this->shareManager->createShare($share);
+			} catch (\Throwable $e) {
+				// Already shared is the common case here, and it is fine.
+				$this->logger->debug('could not share {path} with {uid}: {message}',
+					['path' => $path, 'uid' => $uid, 'message' => $e->getMessage()]);
+			}
 		}
 	}
 
 	/**
-	 * Put the bot account in the session for the length of a share, and give
-	 * back the closure that undoes it.
+	 * Put the bot account in the session for the length of one artifact, and
+	 * give back the closure that undoes it.
 	 *
 	 * Nextcloud tells the recipient who shared with them — "{actor} shared
 	 * {file} with you" in their notifications and activity feed. It takes that
 	 * actor from the session, not from the share's own sharedBy, which we set
 	 * correctly. A cron job has no session, so from 2026-08-02 — the day this
 	 * app took the writing over from the service, which had been sharing over
-	 * HTTP as a signed-in user — every recipient got "  shared 09_Enriched_
-	 * Transcript.md with you" from nobody at all. 2445 shares in August, 486 in
-	 * the first four days of September, every one of them anonymous.
+	 * HTTP as a signed-in user — every recipient was told a file had been
+	 * shared with them by nobody.
+	 *
+	 * **Held around the write, not just the share, and that is the whole
+	 * point.** The activity app asks for the name once and keeps the answer for
+	 * the rest of the process. Creating the file is itself an activity and
+	 * happens first, so wrapping only the share — the 2026-09-05 attempt —
+	 * arrived after the blank had already been cached. It changed nothing: 781
+	 * anonymous notifications in September, the last of them three weeks after
+	 * the fix shipped.
 	 *
 	 * The pattern is Nextcloud's own (apps/forms does the same in its
-	 * background job). One caveat comes with it: the activity app caches the
-	 * identifier the first time it is asked and holds it for the rest of the
-	 * process, so a later job in the same cron run may be attributed here. That
-	 * is a mis-naming of somebody else's activity against no name at all on
-	 * every one of ours, which is the better trade — but it is a trade, not a
-	 * clean win.
+	 * background job). The same caching cuts the other way too: a job running
+	 * later in the same cron process can inherit this name. Mis-naming
+	 * somebody else's activity occasionally beats naming none of ours ever —
+	 * but it is a trade, not a clean win.
 	 */
 	private function signInAs(string $uid): \Closure {
 		$previous = $this->userSession->getUser();
