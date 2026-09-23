@@ -195,9 +195,11 @@ class ArtifactWriterTest extends TestCase {
 		$this->assertNull($this->sessionUser);
 	}
 
+	/** As the analyser writes it: the day in the header, the topic in the heading. */
 	private const SUMMARY = "---\nmeeting_date: '2026-09-04'\n"
-		. "meeting_name: Софтмус • Планёрка\n"
-		. "title: Статусы задач и внедрение ИИ\n---\n\n# Executive Summary\n";
+		. "meeting_file_stem: 2026-09-04_statusy\n---\n\n"
+		. "# Executive Summary: Статусы задач и внедрение ИИ (Пт, 4 сентября 2026)\n\n"
+		. "## Executive brief\n";
 
 	public function testTheRecipientsCopyIsNamedAfterTheMeeting(): void {
 		// Every summary is "01_Executive_Summary.md" under the bot's account, and
@@ -214,9 +216,11 @@ class ArtifactWriterTest extends TestCase {
 	}
 
 	public function testTheTranscriptIsCalledATranscript(): void {
-		$enriched = "---\nmeeting_date: 2026-09-04T11:00\n"
-			. "meeting_name: Статусы задач и внедрение ИИ\n"
-			. "title: Статусы задач и внедрение ИИ\n---\n\nслова\n";
+		// Here `meeting_name` is the topic; `extra.title` is the chat and must
+		// not be taken for it.
+		$enriched = "---\nextra:\n  title: 'Встреча: Софтмус • Планёрка (4 сентября 2026)'\n"
+			. "meeting_date: 2026-09-04T11:00\n"
+			. "meeting_name: Статусы задач и внедрение ИИ\n---\n\nслова\n";
 
 		$this->writer($this->bot())->write(
 			['name' => '2026-09-04/001_planerka/09_Enriched_Transcript.md', 'kind' => 'analysis'],
@@ -236,8 +240,8 @@ class ArtifactWriterTest extends TestCase {
 	}
 
 	public function testATopicIsMadeSafeForAFilename(): void {
-		$summary = str_replace('title: Статусы задач и внедрение ИИ',
-			"title: 'Релиз 2.0: API/UI и «что дальше?»'", self::SUMMARY);
+		$summary = str_replace('Статусы задач и внедрение ИИ',
+			'Релиз 2.0: API/UI и «что дальше?»', self::SUMMARY);
 
 		$this->writer($this->bot())->write(
 			['name' => '2026-09-04/001_planerka/01_Executive_Summary.md', 'kind' => 'summary'],

@@ -52,21 +52,29 @@ class FileArchiveTest extends TestCase {
 		. "# Executive Summary: Запуск обработчика вех вручную (Чт, 11 июня 2026)\n\n"
 		. "## Executive brief\n\nРешили передать задачу.\n";
 
-	/**
-	 * A summary as the analyser writes it since 2026-09-23: the call's time,
-	 * people and chat in its own header, the topic as `title`. Dumped by PyYAML,
-	 * so the timestamps have a space and the list items no indent.
-	 */
-	private const SUMMARY_FULL = "---\nduration: 70 min\n"
-		. "finished_at: 2026-09-09 12:11:00+00:00\n"
-		. "meeting_date: '2026-09-09'\n"
-		. "meeting_file_stem: 2026-09-09_praktiki-ii\n"
-		. "meeting_name: Софтмус • Проектный офис\n"
-		. "participants:\n- Артём Лебсак\n- Вадим Куницын\n"
-		. "started_at: 2026-09-09 11:00:32+00:00\n"
-		. "title: Практики ИИ в разработке\n---\n\n"
+	/** A summary as participants hold it: the day in its header, nothing more. */
+	private const SUMMARY_DAY = "---\nmeeting_date: '2026-09-09'\n"
+		. "meeting_file_stem: 2026-09-09_praktiki-ii\n---\n\n"
 		. "# Executive Summary: Практики ИИ в разработке (Ср, 9 сентября 2026)\n\n"
-		. "## Участники\n\n## Executive brief\n\nРешили сравнить подходы.\n";
+		. "## Executive brief\n\nРешили сравнить подходы.\n";
+
+	/**
+	 * The readable transcript's header as production has it since August: the
+	 * source's own header under `extra`, who spoke under `speakers`, dumped by
+	 * PyYAML — quoted timestamps, a long value folded onto the next line.
+	 */
+	private const ENRICHED = "---\nentities:\n  companies:\n  - Fix Price\n"
+		. "extra:\n  finished_at: '2026-09-09T12:11:00+00:00'\n"
+		. "  source_file: 2026-09-09 14-00-32 - Софтмус • Проектный офис.md\n"
+		. "  started_at: '2026-09-09T11:00:32+00:00'\n"
+		. "  title: 'Встреча: Софтмус • Проектный офис с очень длинным названием, которое\n"
+		. "    PyYAML перенёс (9 сентября 2026)'\n"
+		. "meeting_date: 2026-09-09T11:00\n"
+		. "meeting_name: Практики ИИ в разработке\n"
+		. "speakers:\n  mentioned:\n  - 'Денис Сметанников: упомянут'\n"
+		. "  participants:\n  - name: Артем Лебсак\n    share: 32%\n    turns: 28\n"
+		. "  - name: Вадим Куницын\n    share: 24%\n    turns: 20\n"
+		. "validation_severity: none\n---\n\n**Артем Лебсак:** слова\n";
 
 	private const YAML = "---\ndate: 2026-07-20\n"
 		. "started_at: 2026-07-20T14:00:23Z\n"
@@ -705,24 +713,68 @@ class FileArchiveTest extends TestCase {
 		$this->assertSame(strtotime('2026-06-11'), $meetings[0]['call_start_ts']);
 	}
 
-	public function testASummaryWithItsOwnHeaderGivesTimePeopleAndChat(): void {
+	public function testTheTranscriptBesideASummaryGivesTimePeopleAndChat(): void {
 		// What a participant sees: until 2026-09-23 every call of theirs read
 		// "Today ·" with no hour and no one in it, and opened at "3:00 AM" —
-		// midnight UTC — because all of that lived in a file they never get.
-		$archive = $this->archive(
-			['01_Executive_Summary.md' => self::SUMMARY_FULL],
-			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-09-09', '001')],
-		);
+		// midnight UTC — while the answer sat in the header of the transcript
+		// shared to them beside it, one level down.
+		$folder = $this->meetingFolder(7, '2026-09-09', '001');
+		$archive = $this->archive([
+			'01_Executive_Summary.md' => self::SUMMARY_DAY,
+			'09_Enriched_Transcript.md' => self::ENRICHED,
+		], index: [
+			'01_Executive_Summary.md' => $folder,
+			'09_Enriched_Transcript.md' => $folder,
+		]);
 
 		$meeting = $archive->list('alice')['meetings'][0];
 
 		$this->assertTrue($meeting['has_time']);
-		$this->assertSame(strtotime('2026-09-09 11:00:32+00:00'), $meeting['call_start_ts']);
-		$this->assertSame(strtotime('2026-09-09 12:11:00+00:00'), $meeting['call_end_ts']);
-		$this->assertSame(['Артём Лебсак', 'Вадим Куницын'], $meeting['participants']);
+		$this->assertSame(strtotime('2026-09-09T11:00:32+00:00'), $meeting['call_start_ts']);
+		$this->assertSame(strtotime('2026-09-09T12:11:00+00:00'), $meeting['call_end_ts']);
+		$this->assertSame(['Артем Лебсак', 'Вадим Куницын'], $meeting['participants'],
+			'упомянутые — не участники');
 		$this->assertSame('Практики ИИ в разработке', $meeting['room_name'],
 			'список называет встречу темой, а не чатом');
-		$this->assertSame('Софтмус • Проектный офис', $meeting['chat_name']);
+		$this->assertSame('Софтмус • Проектный офис с очень длинным названием, которое '
+			. 'PyYAML перенёс', $meeting['chat_name'], 'перенос строки оборвал название');
+	}
+
+	public function testAOneToOneKeepsWhatKindOfChatItWas(): void {
+		$folder = $this->meetingFolder(7, '2026-09-11', '001');
+		$enriched = str_replace(
+			"  title: 'Встреча: Софтмус • Проектный офис с очень длинным названием, которое\n"
+			. "    PyYAML перенёс (9 сентября 2026)'\n",
+			"  title: Встреча 1:1 - Дарья Костусенко и Евгений  Кутявин (11 сентября 2026)\n",
+			self::ENRICHED);
+		$archive = $this->archive([
+			'01_Executive_Summary.md' => self::SUMMARY_DAY,
+			'09_Enriched_Transcript.md' => $enriched,
+		], index: [
+			'01_Executive_Summary.md' => $folder,
+			'09_Enriched_Transcript.md' => $folder,
+		]);
+
+		$this->assertSame('Встреча 1:1 - Дарья Костусенко и Евгений Кутявин',
+			$archive->list('alice')['meetings'][0]['chat_name']);
+	}
+
+	public function testATranscriptWithoutFactsLeavesTheDayAlone(): void {
+		// An older transcript, or one whose header could not be read: the call
+		// stays on its day, with no hour made up.
+		$folder = $this->meetingFolder(7, '2026-09-09', '001');
+		$archive = $this->archive([
+			'01_Executive_Summary.md' => self::SUMMARY_DAY,
+			'09_Enriched_Transcript.md' => "---\nmeeting_name: Тема\n---\n\nслова\n",
+		], index: [
+			'01_Executive_Summary.md' => $folder,
+			'09_Enriched_Transcript.md' => $folder,
+		]);
+
+		$meeting = $archive->list('alice')['meetings'][0];
+		$this->assertFalse($meeting['has_time']);
+		$this->assertTrue($meeting['has_transcript']);
+		$this->assertSame(strtotime('2026-09-09'), $meeting['call_start_ts']);
 	}
 
 	public function testATranscriptIsNamedByItsChatAndHasNoSecondChat(): void {
@@ -744,8 +796,8 @@ class FileArchiveTest extends TestCase {
 		// a transcript of its own and its real transcript lost beside it.
 		$folder = $this->meetingFolder(7, '2026-09-09', '001');
 		$archive = $this->archive([
-			'01_Executive_Summary.md' => self::SUMMARY_FULL,
-			'09_Enriched_Transcript.md' => "---\ntitle: Практики ИИ в разработке\n---\n\nслова\n",
+			'01_Executive_Summary.md' => self::SUMMARY_DAY,
+			'09_Enriched_Transcript.md' => self::ENRICHED,
 		], viaShare: true, index: [
 			'01_Executive_Summary.md' => $folder,
 			'09_Enriched_Transcript.md' => $folder,
@@ -759,6 +811,7 @@ class FileArchiveTest extends TestCase {
 		$this->assertCount(1, $meetings, 'итоги и расшифровка — одна встреча, не две');
 		$this->assertSame('Практики ИИ в разработке', $meetings[0]['room_name']);
 		$this->assertTrue($meetings[0]['has_transcript']);
+		$this->assertTrue($meetings[0]['has_time'], 'время не дошло через шару');
 		$this->assertStringContainsString('слова',
 			$archive->transcript('alice', $meetings[0]['session_id']));
 		$this->assertStringContainsString('Решили сравнить подходы',
