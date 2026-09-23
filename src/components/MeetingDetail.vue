@@ -16,9 +16,7 @@
 		<header class="meeting-detail__header">
 			<h2>{{ meeting.room_name || t('voxonta', 'Untitled call') }}</h2>
 			<p class="meeting-detail__meta">
-				{{ formattedDate }}
-				<template v-if="formattedDuration"> · {{ formattedDuration }}</template>
-				<template v-if="participants"> · {{ participants }}</template>
+				{{ [formattedDate, formattedDuration, meeting.chat_name, participants].filter(Boolean).join(' · ') }}
 			</p>
 
 			<!--
@@ -157,7 +155,19 @@ export default {
 			if (!this.meeting.call_start_ts) {
 				return ''
 			}
-			return new Date(this.meeting.call_start_ts * 1000).toLocaleString()
+			const started = new Date(this.meeting.call_start_ts * 1000)
+			// A call known by its summary alone has a day and no hour. Printing
+			// the hour anyway showed midnight UTC — "3:00:00 AM" in Moscow.
+			if (this.meeting.has_time === false) {
+				return started.toLocaleDateString()
+			}
+			return started.toLocaleString([], {
+				year: 'numeric',
+				month: 'numeric',
+				day: 'numeric',
+				hour: '2-digit',
+				minute: '2-digit',
+			})
 		},
 
 		formattedDuration() {

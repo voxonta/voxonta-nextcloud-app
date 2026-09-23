@@ -103,7 +103,7 @@
 						<MicrophoneIcon :size="32" />
 					</template>
 					<template #subname>
-						{{ when(meeting) }} · {{ people(meeting) }}
+						{{ subline(meeting) }}
 					</template>
 				</NcListItem>
 			</template>
@@ -407,6 +407,19 @@ export default {
 					hours: Math.floor(minutes / 60),
 					minutes: minutes % 60,
 				})
+		},
+
+		/**
+		 * When, where and who, leaving out whatever is not known — a call known
+		 * by its summary alone used to read "Today ·" with nothing after it.
+		 *
+		 * @param {object} meeting a row of the list
+		 * @return {string}
+		 */
+		subline(meeting) {
+			return [this.when(meeting), meeting.chat_name, this.people(meeting)]
+				.filter(Boolean)
+				.join(' · ')
 		},
 
 		people(meeting) {

@@ -888,27 +888,36 @@ class FileArchive {
 			// The body too, or it has no folder and nothing to pair it with —
 			// which is exactly how the transcript went missing from meetings
 			// that were holding it all along.
-			if (str_starts_with($entry['name'], self::ANALYSIS_TRANSCRIPT)
-				|| str_starts_with($entry['name'], self::ANALYSIS_SUMMARY)
-				|| str_starts_with($entry['name'], self::ANALYSIS_BODY)) {
+			//
+			// And anything reached through a share or a search, whatever it is
+			// called: that name is the recipient's, not the file's. Since
+			// 2026-09-23 a recipient's copy is "2026-09-23 <topic> — итоги.md",
+			// which says nothing about being a summary and looks exactly like a
+			// spring transcript. The file's own name is in the index.
+			if ($this->isAnalysis($entry['name'])
+				|| $entry['share'] !== null || $entry['node'] !== null) {
 				$wanted[$id] = true;
 			}
 		}
 		if ($wanted === []) {
 			return;
 		}
-		$ids = array_keys($wanted);
 
+		$rows = [];
 		try {
-			$qb = $this->db->getQueryBuilder();
-			$qb->select('fileid', 'parent', 'path')
-				->from('filecache')
-				->where($qb->expr()->in('fileid',
-					$qb->createNamedParameter($ids,
-						IQueryBuilder::PARAM_INT_ARRAY)));
-			$result = $qb->executeQuery();
-			$rows = $result->fetchAll();
-			$result->closeCursor();
+			// In slices: an account holding thousands of shares would otherwise
+			// send one IN list longer than some databases accept.
+			foreach (array_chunk(array_keys($wanted), 1000) as $ids) {
+				$qb = $this->db->getQueryBuilder();
+				$qb->select('fileid', 'parent', 'path', 'name')
+					->from('filecache')
+					->where($qb->expr()->in('fileid',
+						$qb->createNamedParameter($ids,
+							IQueryBuilder::PARAM_INT_ARRAY)));
+				$result = $qb->executeQuery();
+				array_push($rows, ...$result->fetchAll());
+				$result->closeCursor();
+			}
 		} catch (\Throwable $e) {
 			$this->logger->warning('could not read the index for analysed calls', [
 				'exception' => $e,
@@ -924,6 +933,13 @@ class FileArchive {
 			if (!isset($wanted[$id])) {
 				continue;
 			}
+			// Only an analyser's file is taken by its real name. A spring
+			// transcript keeps the name it was found under: that name carries
+			// its date and participants, and it is what orders and searches it.
+			if (!$this->isAnalysis((string)$row['name'])) {
+				continue;
+			}
+			$entries[$id]['name'] = (string)$row['name'];
 			$entries[$id]['folder'] = (int)$row['parent'];
 			if (preg_match(self::ANALYSIS_PATH, (string)$row['path'], $m) === 1) {
 				// Sorting is on this string for every format at once, so it is
@@ -933,6 +949,13 @@ class FileArchive {
 				$entries[$id]['date'] = strtotime($m[1]) ?: 0;
 			}
 		}
+	}
+
+	/** One of the analyser's own files, by the name it has in the index. */
+	private function isAnalysis(string $name): bool {
+		return str_starts_with($name, self::ANALYSIS_TRANSCRIPT)
+			|| str_starts_with($name, self::ANALYSIS_SUMMARY)
+			|| str_starts_with($name, self::ANALYSIS_BODY);
 	}
 
 	/**
@@ -1161,11 +1184,16 @@ class FileArchive {
 		$name = $meta['meeting_name'] !== ''
 			? $meta['meeting_name']
 			: $this->title($file->getName());
-		unset($meta['meeting_name']);
+		// `title` is the transcript's heading line, not a name for the list:
+		// the summary reads it itself and hands over what it means.
+		unset($meta['meeting_name'], $meta['title']);
 
 		return $meta + [
 			'session_id' => $this->sessionId($file),
 			'room_name' => $name,
+			// The chat, when it is not already the name above: a transcript is
+			// listed under its chat, a summary under its topic.
+			'chat_name' => '',
 			'has_transcript' => !$summaryOnly,
 			'has_time' => true,
 		];
@@ -1193,6 +1221,22 @@ class FileArchive {
 			// The heading ends with the date in words, which the list already
 			// shows above the call.
 			$name = trim(preg_replace('/\s*\([^()]*\)\s*$/u', '', $h[1]));
+		}
+
+		// Since 2026-09-23 the summary carries the call's time, people and chat
+		// in its own header — the same fields, under the same names, as the
+		// transcript that recipients are never given. There `meeting_name` is
+		// the chat, and the topic is `title`.
+		$full = str_contains($head, "\nstarted_at:") ? $this->fromYaml($head) : null;
+		if ($full !== null) {
+			return [
+				'call_start_ts' => $full['call_start_ts'],
+				'call_end_ts' => $full['call_end_ts'],
+				'has_time' => true,
+				'participants' => $full['participants'],
+				'meeting_name' => $full['title'] !== '' ? $full['title'] : $name,
+				'chat_name' => $full['meeting_name'],
+			];
 		}
 
 		return [
@@ -1257,6 +1301,7 @@ class FileArchive {
 			'call_end_ts' => $end > $start ? $end : 0,
 			'participants' => $participants,
 			'meeting_name' => $scalars['meeting_name'] ?? '',
+			'title' => $scalars['title'] ?? '',
 		];
 	}
 

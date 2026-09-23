@@ -34,6 +34,9 @@ class ArtifactWriterTest extends TestCase {
 	private array $creators = [];
 	private ?IUser $sessionUser = null;
 	private bool $shareThrows = false;
+	/** What each recipient's copy was renamed to, as [uid, target]. */
+	private array $moves = [];
+	private bool $moveThrows = false;
 
 	/**
 	 * IShare's setters are fluent but declare no return type, so a plain mock
@@ -46,6 +49,24 @@ class ArtifactWriterTest extends TestCase {
 			'setPermissions'] as $setter) {
 			$share->method($setter)->willReturnSelf();
 		}
+		return $share;
+	}
+
+	/**
+	 * A share as Nextcloud hands it back: named after the file, in the
+	 * recipient's share folder, with a target that can be changed.
+	 */
+	private function createdShare(): IShare {
+		$target = '/Shares/01_Executive_Summary.md';
+		$share = $this->createMock(IShare::class);
+		$share->method('getTarget')->willReturnCallback(static function () use (&$target) {
+			return $target;
+		});
+		$share->method('setTarget')->willReturnCallback(
+			static function (string $t) use (&$target, $share) {
+				$target = $t;
+				return $share;
+			});
 		return $share;
 	}
 
@@ -73,8 +94,16 @@ class ArtifactWriterTest extends TestCase {
 			if ($this->shareThrows) {
 				throw new \RuntimeException('already shared');
 			}
-			return $this->createMock(IShare::class);
+			return $this->createdShare();
 		});
+		$shares->method('moveShare')->willReturnCallback(
+			function (IShare $share, string $uid) {
+				if ($this->moveThrows) {
+					throw new \InvalidArgumentException('Invalid share recipient');
+				}
+				$this->moves[] = [$uid, $share->getTarget()];
+				return $share;
+			});
 
 		$account = $this->createMock(BotAccount::class);
 		$account->method('credentials')->willReturn(
@@ -163,6 +192,82 @@ class ArtifactWriterTest extends TestCase {
 		$writer = $this->writer($this->bot());
 		$this->writeOne($writer);
 
+		$this->assertNull($this->sessionUser);
+	}
+
+	private const SUMMARY = "---\nmeeting_date: '2026-09-04'\n"
+		. "meeting_name: Софтмус • Планёрка\n"
+		. "title: Статусы задач и внедрение ИИ\n---\n\n# Executive Summary\n";
+
+	public function testTheRecipientsCopyIsNamedAfterTheMeeting(): void {
+		// Every summary is "01_Executive_Summary.md" under the bot's account, and
+		// by September one person's share folder held two hundred of them,
+		// numbered. The recipient's copy now says which meeting it is.
+		$this->writer($this->bot())->write(
+			['name' => '2026-09-04/001_planerka/01_Executive_Summary.md', 'kind' => 'summary'],
+			self::SUMMARY, ['anatoliy.h', 'vadim.k']);
+
+		$this->assertSame([
+			['anatoliy.h', '/Shares/2026-09-04 Статусы задач и внедрение ИИ — итоги.md'],
+			['vadim.k', '/Shares/2026-09-04 Статусы задач и внедрение ИИ — итоги.md'],
+		], $this->moves);
+	}
+
+	public function testTheTranscriptIsCalledATranscript(): void {
+		$enriched = "---\nmeeting_date: 2026-09-04T11:00\n"
+			. "meeting_name: Статусы задач и внедрение ИИ\n"
+			. "title: Статусы задач и внедрение ИИ\n---\n\nслова\n";
+
+		$this->writer($this->bot())->write(
+			['name' => '2026-09-04/001_planerka/09_Enriched_Transcript.md', 'kind' => 'analysis'],
+			$enriched, ['vadim.k']);
+
+		$this->assertSame(
+			[['vadim.k', '/Shares/2026-09-04 Статусы задач и внедрение ИИ — расшифровка.md']],
+			$this->moves);
+	}
+
+	public function testAFileWithoutATopicKeepsItsOwnName(): void {
+		// Anything written before the analyser named its topic: a half-made name
+		// ("2026-09-04 — итоги.md") would be worse than the old one.
+		$this->writeOne($this->writer($this->bot()));
+
+		$this->assertSame([], $this->moves);
+	}
+
+	public function testATopicIsMadeSafeForAFilename(): void {
+		$summary = str_replace('title: Статусы задач и внедрение ИИ',
+			"title: 'Релиз 2.0: API/UI и «что дальше?»'", self::SUMMARY);
+
+		$this->writer($this->bot())->write(
+			['name' => '2026-09-04/001_planerka/01_Executive_Summary.md', 'kind' => 'summary'],
+			$summary, ['vadim.k']);
+
+		$this->assertSame(
+			[['vadim.k', '/Shares/2026-09-04 Релиз 2.0 API UI и «что дальше» — итоги.md']],
+			$this->moves);
+	}
+
+	public function testAFoldedTopicIsReadWhole(): void {
+		// PyYAML wraps a long value at eighty columns onto indented lines.
+		$meta = ArtifactWriter::frontMatter("---\nmeeting_date: '2026-09-04'\n"
+			. "title: Очень длинная тема встречи, которая не поместилась в восемьдесят\n"
+			. "  символов одной строкой\nparticipants:\n- Вадим\n---\n");
+
+		$this->assertSame('Очень длинная тема встречи, которая не поместилась в восемьдесят'
+			. ' символов одной строкой', $meta['title']);
+		$this->assertSame('2026-09-04', $meta['meeting_date']);
+	}
+
+	public function testARenameThatFailsLeavesTheShare(): void {
+		// The share is what matters; its name is a convenience. One recipient's
+		// failed rename must not cost the next one their share.
+		$this->moveThrows = true;
+
+		$this->assertTrue($this->writer($this->bot())->write(
+			['name' => '2026-09-04/001_planerka/01_Executive_Summary.md', 'kind' => 'summary'],
+			self::SUMMARY, ['anatoliy.h', 'vadim.k']));
+		$this->assertSame(['transcriber', 'transcriber'], $this->actors);
 		$this->assertNull($this->sessionUser);
 	}
 
