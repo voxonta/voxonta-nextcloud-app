@@ -208,7 +208,15 @@ class FileArchive {
 				// not about the summary's own header — so it is answered here,
 				// where the other files of the meeting are in reach.
 				if (empty($meta['has_transcript'])) {
-					$meta['has_transcript'] = $this->bodyFile($userId, $entry) !== null;
+					$body = $this->bodyEntry($userId, $entry);
+					$meta['has_transcript'] = $body !== null
+						&& $this->resolve($userId, $body) !== null;
+					// The summary knows the day only; the transcript beside it
+					// knows the hour, the chat and who spoke.
+					if ($meta['has_transcript'] && ($meta['has_time'] ?? true) === false) {
+						$meta = $this->withTranscriptFacts($meta,
+							$this->transcriptFacts($userId, $body));
+					}
 				}
 				$meetings[] = $meta;
 				$day = $this->day($entry);
@@ -318,6 +326,17 @@ class FileArchive {
 	 * @param array<string, mixed> $entry
 	 */
 	private function bodyFile(string $userId, array $entry): ?File {
+		$body = $this->bodyEntry($userId, $entry);
+		return $body === null ? null : $this->resolve($userId, $body);
+	}
+
+	/**
+	 * The readable transcript's candidate entry — not yet opened.
+	 *
+	 * @param array<string, mixed> $entry
+	 * @return array<string, mixed>|null
+	 */
+	private function bodyEntry(string $userId, array $entry): ?array {
 		$folder = $entry['folder'] ?? 0;
 		if ($folder === 0) {
 			return null;
@@ -325,10 +344,149 @@ class FileArchive {
 		foreach ($this->candidates($userId) as $other) {
 			if (($other['folder'] ?? 0) === $folder
 				&& str_starts_with((string)$other['name'], self::ANALYSIS_BODY)) {
-				return $this->resolve($userId, $other);
+				return $other;
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * When the call ran, in which chat, and who spoke — from the readable
+	 * transcript's header, which every participant holds.
+	 *
+	 * A participant is given the summary and this file, never the original
+	 * transcript, and the summary's header names the day and nothing more. So
+	 * until 2026-09-23 their archive listed every call as "Today ·" with no
+	 * hour and nobody in it, and opened it at "3:00 AM" — midnight UTC — while
+	 * the answer sat in this header all along, one level down: `extra` holds
+	 * the source's own header, `speakers.participants` who spoke.
+	 *
+	 * Cached under the transcript's own id, apart from the summary's parse:
+	 * the background warm-up reads each file alone and could not pair them.
+	 *
+	 * @param array<string, mixed> $body the transcript's candidate entry
+	 * @return array{call_start_ts?: int, call_end_ts?: int,
+	 *               participants?: string[], chat_name?: string}
+	 */
+	private function transcriptFacts(string $userId, array $body): array {
+		$cache = $this->headerCache();
+		$key = 'b' . (int)$body['id'];
+		$cached = $cache->get($key);
+		if (is_array($cached)) {
+			return $cached;
+		}
+		$file = $this->resolve($userId, $body);
+		if ($file === null) {
+			return [];
+		}
+		$head = $this->head($file);
+		$facts = $head === null ? [] : $this->factsFrom($head);
+		$cache->set($key, $facts, 30 * 24 * 3600);
+		return $facts;
+	}
+
+	/**
+	 * Fill what the summary could not say, and nothing it did.
+	 *
+	 * @param array<string, mixed> $meta
+	 * @param array<string, mixed> $facts
+	 * @return array<string, mixed>
+	 */
+	private function withTranscriptFacts(array $meta, array $facts): array {
+		if (isset($facts['call_start_ts'])) {
+			$meta['call_start_ts'] = $facts['call_start_ts'];
+			$meta['call_end_ts'] = $facts['call_end_ts'] ?? 0;
+			$meta['has_time'] = true;
+		}
+		if (empty($meta['participants']) && !empty($facts['participants'])) {
+			$meta['participants'] = $facts['participants'];
+		}
+		if (($meta['chat_name'] ?? '') === '' && ($facts['chat_name'] ?? '') !== '') {
+			$meta['chat_name'] = $facts['chat_name'];
+		}
+		return $meta;
+	}
+
+	/**
+	 * @return array{call_start_ts?: int, call_end_ts?: int,
+	 *               participants?: string[], chat_name?: string}
+	 */
+	private function factsFrom(string $head): array {
+		$head = ltrim($head);
+		if (!str_starts_with($head, '---')) {
+			return [];
+		}
+		$end = strpos($head, "\n---", 3);
+		$block = ($end === false ? $head : substr($head, 0, $end)) . "\n";
+
+		$facts = [];
+		$extra = $this->nested($block, 'extra');
+		$start = strtotime($this->unquote($this->field($extra, 'started_at'))) ?: 0;
+		$finish = strtotime($this->unquote($this->field($extra, 'finished_at'))) ?: 0;
+		if ($start > 0) {
+			$facts['call_start_ts'] = $start;
+			$facts['call_end_ts'] = $finish > $start ? $finish : 0;
+		}
+
+		// "Встреча: Серафима • Проектная группа (28 августа 2026)" — the chat,
+		// between a prefix the source adds and the date the list already shows.
+		// A one-to-one reads "Встреча 1:1 - A и B (…)" and keeps its prefix,
+		// which is the part that says what kind of chat it was.
+		$title = $this->unquote($this->field($extra, 'title'));
+		$chat = preg_replace(['/^Встреча:\s*/u', '/\s*\([^()]*\)\s*$/u'], '', $title) ?? '';
+		$chat = trim(preg_replace('/\s+/u', ' ', $chat) ?? '');
+		if ($chat !== '') {
+			$facts['chat_name'] = $chat;
+		}
+
+		// Who spoke, in the order the analyser lists them. Those who were in the
+		// call and said nothing are not in this header at all.
+		$speakers = $this->nested($block, 'speakers');
+		$at = strpos($speakers, "\n  participants:\n");
+		if ($at !== false) {
+			$list = substr($speakers, $at + strlen("\n  participants:\n"));
+			// The list ends where the next key at the same depth begins.
+			if (preg_match('/^  \w+:/mu', $list, $next, PREG_OFFSET_CAPTURE) === 1) {
+				$list = substr($list, 0, $next[0][1]);
+			}
+			preg_match_all('/^  - name:\s*(.+)$/mu', $list, $names);
+			$people = array_values(array_filter(array_map(
+				fn (string $n) => $this->unquote($n), $names[1])));
+			if ($people !== []) {
+				$facts['participants'] = $people;
+			}
+		}
+		return $facts;
+	}
+
+	/** The indented lines under a top-level key, with a leading newline. */
+	private function nested(string $block, string $key): string {
+		return preg_match('/^' . preg_quote($key, '/') . ":\n((?:[ \\t]+.*\n)*)/mu",
+			$block, $m) === 1 ? "\n" . $m[1] : '';
+	}
+
+	/**
+	 * A scalar two spaces in, under a nested block — with the lines PyYAML
+	 * folds a long value onto, which sit deeper still.
+	 */
+	private function field(string $nested, string $key): string {
+		if (preg_match('/^  ' . preg_quote($key, '/') . ':[ \t]*(.*)\n((?:    .*\n)*)/mu',
+			$nested . "\n", $m) !== 1) {
+			return '';
+		}
+		$folded = array_map('trim', array_filter(explode("\n", $m[2])));
+		return trim(implode(' ', [$m[1], ...$folded]));
+	}
+
+	private function unquote(string $value): string {
+		$value = trim($value);
+		if (strlen($value) >= 2 && $value[0] === "'" && str_ends_with($value, "'")) {
+			return str_replace("''", "'", substr($value, 1, -1));
+		}
+		if (strlen($value) >= 2 && $value[0] === '"' && str_ends_with($value, '"')) {
+			return stripcslashes(substr($value, 1, -1));
+		}
+		return $value;
 	}
 
 	public function transcript(string $userId, string $sessionId): string {
@@ -547,7 +705,8 @@ class FileArchive {
 				->where($qb->expr()->orX(
 					$qb->expr()->in('f.name',
 						$qb->createNamedParameter(
-							[self::ANALYSIS_SUMMARY . '.md', self::ANALYSIS_TRANSCRIPT . '.md'],
+							[self::ANALYSIS_SUMMARY . '.md', self::ANALYSIS_TRANSCRIPT . '.md',
+								self::ANALYSIS_BODY . '.md'],
 							IQueryBuilder::PARAM_STR_ARRAY)),
 					$qb->expr()->like('f.name',
 						$qb->createNamedParameter(self::NAME_PATTERN)),
@@ -577,7 +736,8 @@ class FileArchive {
 				continue;
 			}
 			$summaryOnly = str_starts_with($name, self::ANALYSIS_SUMMARY);
-			$key = ($summaryOnly ? 's' : 't') . $id;
+			$body = str_starts_with($name, self::ANALYSIS_BODY);
+			$key = ($body ? 'b' : ($summaryOnly ? 's' : 't')) . $id;
 			if ($cache->get($key) !== null) {
 				continue;
 			}
@@ -594,8 +754,14 @@ class FileArchive {
 				if (!$file instanceof File) {
 					continue;
 				}
-				$cache->set($key, $this->readMetadata($file, $summaryOnly) ?? [],
-					30 * 24 * 3600);
+				if ($body) {
+					$head = $this->head($file);
+					$cache->set($key, $head === null ? [] : $this->factsFrom($head),
+						30 * 24 * 3600);
+				} else {
+					$cache->set($key, $this->readMetadata($file, $summaryOnly) ?? [],
+						30 * 24 * 3600);
+				}
 				$warmed++;
 			} catch (\Throwable $e) {
 				$this->logger->warning('could not warm call {id}',
@@ -1184,15 +1350,14 @@ class FileArchive {
 		$name = $meta['meeting_name'] !== ''
 			? $meta['meeting_name']
 			: $this->title($file->getName());
-		// `title` is the transcript's heading line, not a name for the list:
-		// the summary reads it itself and hands over what it means.
-		unset($meta['meeting_name'], $meta['title']);
+		unset($meta['meeting_name']);
 
 		return $meta + [
 			'session_id' => $this->sessionId($file),
 			'room_name' => $name,
 			// The chat, when it is not already the name above: a transcript is
-			// listed under its chat, a summary under its topic.
+			// listed under its chat, a summary under its topic — its chat comes
+			// from the readable transcript beside it (withTranscriptFacts).
 			'chat_name' => '',
 			'has_transcript' => !$summaryOnly,
 			'has_time' => true,
@@ -1221,22 +1386,6 @@ class FileArchive {
 			// The heading ends with the date in words, which the list already
 			// shows above the call.
 			$name = trim(preg_replace('/\s*\([^()]*\)\s*$/u', '', $h[1]));
-		}
-
-		// Since 2026-09-23 the summary carries the call's time, people and chat
-		// in its own header — the same fields, under the same names, as the
-		// transcript that recipients are never given. There `meeting_name` is
-		// the chat, and the topic is `title`.
-		$full = str_contains($head, "\nstarted_at:") ? $this->fromYaml($head) : null;
-		if ($full !== null) {
-			return [
-				'call_start_ts' => $full['call_start_ts'],
-				'call_end_ts' => $full['call_end_ts'],
-				'has_time' => true,
-				'participants' => $full['participants'],
-				'meeting_name' => $full['title'] !== '' ? $full['title'] : $name,
-				'chat_name' => $full['meeting_name'],
-			];
 		}
 
 		return [
@@ -1301,7 +1450,6 @@ class FileArchive {
 			'call_end_ts' => $end > $start ? $end : 0,
 			'participants' => $participants,
 			'meeting_name' => $scalars['meeting_name'] ?? '',
-			'title' => $scalars['title'] ?? '',
 		];
 	}
 

@@ -251,21 +251,29 @@ class ArtifactWriter {
 	 * "2026-09-23 Статусы задач и внедрение ИИ — итоги.md", or null to keep the
 	 * file's own name.
 	 *
-	 * The topic comes from the file's front matter: the analyser writes it as
-	 * `title` since 2026-09-23. A file without one — anything older — keeps its
-	 * name rather than getting a half-made one.
+	 * The topic is the one the analyser gave the meeting, and each file states
+	 * it in its own way: the summary in its heading, "# Executive Summary:
+	 * <topic> (<date in words>)", the readable transcript as `meeting_name` —
+	 * which in the original transcript is the chat, so it is read here only.
+	 * A file that states none keeps its name rather than a half-made one.
 	 */
 	private function recipientName(string $name, string $content): ?string {
-		$label = match (true) {
-			str_starts_with(basename($name), '01_Executive_Summary') => 'итоги',
-			str_starts_with(basename($name), '09_Enriched_Transcript') => 'расшифровка',
-			default => null,
-		};
-		if ($label === null) {
+		$summary = str_starts_with(basename($name), '01_Executive_Summary');
+		$transcript = str_starts_with(basename($name), '09_Enriched_Transcript');
+		if (!$summary && !$transcript) {
 			return null;
 		}
 		$meta = self::frontMatter($content);
-		$title = self::fileSafe($meta['title'] ?? '');
+		$topic = $meta['title'] ?? '';
+		if ($topic === '' && $transcript) {
+			$topic = $meta['meeting_name'] ?? '';
+		}
+		if ($topic === '' && $summary
+			&& preg_match('/^#\s*Executive Summary:\s*(.+)$/mu', $content, $h) === 1) {
+			$topic = preg_replace('/\s*\([^()]*\)\s*$/u', '', $h[1]) ?? '';
+		}
+		$label = $summary ? 'итоги' : 'расшифровка';
+		$title = self::fileSafe($topic);
 		if ($title === '') {
 			return null;
 		}
