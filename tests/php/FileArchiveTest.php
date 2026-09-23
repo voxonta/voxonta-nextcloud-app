@@ -52,6 +52,22 @@ class FileArchiveTest extends TestCase {
 		. "# Executive Summary: Запуск обработчика вех вручную (Чт, 11 июня 2026)\n\n"
 		. "## Executive brief\n\nРешили передать задачу.\n";
 
+	/**
+	 * A summary as the analyser writes it since 2026-09-23: the call's time,
+	 * people and chat in its own header, the topic as `title`. Dumped by PyYAML,
+	 * so the timestamps have a space and the list items no indent.
+	 */
+	private const SUMMARY_FULL = "---\nduration: 70 min\n"
+		. "finished_at: 2026-09-09 12:11:00+00:00\n"
+		. "meeting_date: '2026-09-09'\n"
+		. "meeting_file_stem: 2026-09-09_praktiki-ii\n"
+		. "meeting_name: Софтмус • Проектный офис\n"
+		. "participants:\n- Артём Лебсак\n- Вадим Куницын\n"
+		. "started_at: 2026-09-09 11:00:32+00:00\n"
+		. "title: Практики ИИ в разработке\n---\n\n"
+		. "# Executive Summary: Практики ИИ в разработке (Ср, 9 сентября 2026)\n\n"
+		. "## Участники\n\n## Executive brief\n\nРешили сравнить подходы.\n";
+
 	private const YAML = "---\ndate: 2026-07-20\n"
 		. "started_at: 2026-07-20T14:00:23Z\n"
 		. "finished_at: 2026-07-20T14:40:23Z\n"
@@ -66,21 +82,23 @@ class FileArchiveTest extends TestCase {
 	 */
 	private function archive(array $files, ?string &$askedFor = null,
 		bool $lookupThrows = false, bool $viaShare = false,
-		array $index = [], bool $analysisFolder = false): FileArchive {
+		array $index = [], bool $analysisFolder = false,
+		array $targets = []): FileArchive {
 		$nodes = [];
 		$shares = [];
 		$rows = [];
 		foreach ($files as $name => $content) {
 			$file = $this->file($name, $content);
 			if ($viaShare) {
-				$shares[] = $this->shareOf($file);
+				$shares[] = $this->shareOf($file, $targets[$name] ?? null);
 			} else {
 				$nodes[] = $file;
 			}
 			// What the file index says about this file. The analyser's files
 			// have a meeting folder and a dated path there; nothing else does.
+			// The name is the file's own, whatever the recipient calls it.
 			$rows[$file->getId()] = ($index[$name] ?? [])
-				+ ['parent' => 1, 'path' => 'files/' . $name];
+				+ ['parent' => 1, 'path' => 'files/' . $name, 'name' => $name];
 		}
 
 		// The archive folder holds the files, unless the test routes them
@@ -194,7 +212,7 @@ class FileArchiveTest extends TestCase {
 		] + ($rows[$f->getId()] ?? []), $nodes);
 		foreach ($shares as $share) {
 			$id = $share->getNodeId();
-			$all[] = ['fileid' => $id, 'name' => ''] + ($rows[$id] ?? []);
+			$all[] = ['fileid' => $id] + ($rows[$id] ?? []) + ['name' => ''];
 		}
 
 		$result = $this->createMock(\OCP\DB\IResult::class);
@@ -236,11 +254,11 @@ class FileArchiveTest extends TestCase {
 		return $file;
 	}
 
-	private function shareOf(File $file): IShare {
+	private function shareOf(File $file, ?string $target = null): IShare {
 		$share = $this->createMock(IShare::class);
 		$share->method('getNodeId')->willReturn($file->getId());
 		$share->method('getNodeType')->willReturn('file');
-		$share->method('getTarget')->willReturn('/' . $file->getName());
+		$share->method('getTarget')->willReturn($target ?? '/' . $file->getName());
 		$share->method('getNode')->willReturn($file);
 		return $share;
 	}
@@ -685,6 +703,66 @@ class FileArchiveTest extends TestCase {
 		$this->assertFalse($meetings[0]['has_time'],
 			'the summary states the day only — an hour would be invented');
 		$this->assertSame(strtotime('2026-06-11'), $meetings[0]['call_start_ts']);
+	}
+
+	public function testASummaryWithItsOwnHeaderGivesTimePeopleAndChat(): void {
+		// What a participant sees: until 2026-09-23 every call of theirs read
+		// "Today ·" with no hour and no one in it, and opened at "3:00 AM" —
+		// midnight UTC — because all of that lived in a file they never get.
+		$archive = $this->archive(
+			['01_Executive_Summary.md' => self::SUMMARY_FULL],
+			index: ['01_Executive_Summary.md' => $this->meetingFolder(7, '2026-09-09', '001')],
+		);
+
+		$meeting = $archive->list('alice')['meetings'][0];
+
+		$this->assertTrue($meeting['has_time']);
+		$this->assertSame(strtotime('2026-09-09 11:00:32+00:00'), $meeting['call_start_ts']);
+		$this->assertSame(strtotime('2026-09-09 12:11:00+00:00'), $meeting['call_end_ts']);
+		$this->assertSame(['Артём Лебсак', 'Вадим Куницын'], $meeting['participants']);
+		$this->assertSame('Практики ИИ в разработке', $meeting['room_name'],
+			'список называет встречу темой, а не чатом');
+		$this->assertSame('Софтмус • Проектный офис', $meeting['chat_name']);
+	}
+
+	public function testATranscriptIsNamedByItsChatAndHasNoSecondChat(): void {
+		$archive = $this->archive(
+			['10_Original_Transcript.md' => self::ANALYSIS],
+			index: ['10_Original_Transcript.md' => $this->meetingFolder(7, '2026-07-20', '004')],
+		);
+
+		$meeting = $archive->list('alice')['meetings'][0];
+
+		$this->assertSame('ППортал • Дейли', $meeting['room_name']);
+		$this->assertSame('', $meeting['chat_name'], 'чат повторился бы дважды в строке');
+	}
+
+	public function testARenamedShareIsStillKnownForWhatItIs(): void {
+		// Since 2026-09-23 a recipient's copy is named after the meeting. The
+		// name begins with a date, which is exactly what a spring transcript
+		// looks like — read by that name, the summary would have been listed as
+		// a transcript of its own and its real transcript lost beside it.
+		$folder = $this->meetingFolder(7, '2026-09-09', '001');
+		$archive = $this->archive([
+			'01_Executive_Summary.md' => self::SUMMARY_FULL,
+			'09_Enriched_Transcript.md' => "---\ntitle: Практики ИИ в разработке\n---\n\nслова\n",
+		], viaShare: true, index: [
+			'01_Executive_Summary.md' => $folder,
+			'09_Enriched_Transcript.md' => $folder,
+		], targets: [
+			'01_Executive_Summary.md' => '/Shares/2026-09-09 Практики ИИ в разработке — итоги.md',
+			'09_Enriched_Transcript.md' => '/Shares/2026-09-09 Практики ИИ в разработке — расшифровка.md',
+		]);
+
+		$meetings = $archive->list('alice')['meetings'];
+
+		$this->assertCount(1, $meetings, 'итоги и расшифровка — одна встреча, не две');
+		$this->assertSame('Практики ИИ в разработке', $meetings[0]['room_name']);
+		$this->assertTrue($meetings[0]['has_transcript']);
+		$this->assertStringContainsString('слова',
+			$archive->transcript('alice', $meetings[0]['session_id']));
+		$this->assertStringContainsString('Решили сравнить подходы',
+			$archive->summary('alice', $meetings[0]['session_id']));
 	}
 
 	public function testSuchACallOpensItsSummaryAndHasNoTranscript(): void {

@@ -122,7 +122,8 @@ class ArtifactWriter {
 
 			$this->logger->info('wrote {path}', ['path' => $relative]);
 			if ($this->shouldShare($kind, $name)) {
-				$this->share($uid, $relative, $participants);
+				$this->share($uid, $relative, $participants,
+					$this->recipientName($name, $content));
 			}
 			return true;
 		} finally {
@@ -175,8 +176,11 @@ class ArtifactWriter {
 	 * part that matters, and a missing share can be fixed by hand.
 	 *
 	 * @param array<int, string> $participants user ids
+	 * @param ?string $recipientName what the recipient's copy is called, or null
+	 *                               to leave it under the file's own name
 	 */
-	private function share(string $owner, string $path, array $participants): void {
+	private function share(string $owner, string $path, array $participants,
+		?string $recipientName = null): void {
 		if (!$this->appConfig->getValueBool(
 				Application::APP_ID, AdminSettings::KEY_PUBLISH_TO_CHAT, true)) {
 			return;
@@ -202,13 +206,128 @@ class ArtifactWriter {
 					->setSharedWith($uid)
 					->setSharedBy($owner)
 					->setPermissions(\OCP\Constants::PERMISSION_READ);
-				$this->shareManager->createShare($share);
+				$created = $this->shareManager->createShare($share);
 			} catch (\Throwable $e) {
 				// Already shared is the common case here, and it is fine.
 				$this->logger->debug('could not share {path} with {uid}: {message}',
 					['path' => $path, 'uid' => $uid, 'message' => $e->getMessage()]);
+				continue;
+			}
+			if ($recipientName !== null) {
+				$this->rename($created, $uid, $recipientName);
 			}
 		}
+	}
+
+	/**
+	 * Give the recipient's copy a name that says which meeting it is.
+	 *
+	 * Every meeting's files are called the same — "01_Executive_Summary.md" —
+	 * and they all land in one folder of the recipient's, so Nextcloud numbers
+	 * them: one person held "01_Executive_Summary (202).md" by September, and
+	 * finding a meeting in Files meant opening them one by one.
+	 *
+	 * Only the recipient's view changes. The file under the bot's account keeps
+	 * its name, because the archive and the analyser's folder layout both rely
+	 * on it. Nextcloud always names a new share after its file, so this is a
+	 * move made right after creation; it notifies nobody.
+	 *
+	 * A failed rename leaves the share under the file's own name — worse to
+	 * look at, still a working share.
+	 */
+	private function rename(IShare $share, string $uid, string $name): void {
+		try {
+			$folder = dirname($share->getTarget());
+			$folder = $folder === '.' ? '' : rtrim($folder, '/');
+			$share->setTarget($folder . '/' . $name);
+			$this->shareManager->moveShare($share, $uid);
+		} catch (\Throwable $e) {
+			$this->logger->warning('could not rename the share of {name} for {uid}: {message}',
+				['name' => $name, 'uid' => $uid, 'message' => $e->getMessage()]);
+		}
+	}
+
+	/**
+	 * "2026-09-23 Статусы задач и внедрение ИИ — итоги.md", or null to keep the
+	 * file's own name.
+	 *
+	 * The topic comes from the file's front matter: the analyser writes it as
+	 * `title` since 2026-09-23. A file without one — anything older — keeps its
+	 * name rather than getting a half-made one.
+	 */
+	private function recipientName(string $name, string $content): ?string {
+		$label = match (true) {
+			str_starts_with(basename($name), '01_Executive_Summary') => 'итоги',
+			str_starts_with(basename($name), '09_Enriched_Transcript') => 'расшифровка',
+			default => null,
+		};
+		if ($label === null) {
+			return null;
+		}
+		$meta = self::frontMatter($content);
+		$title = self::fileSafe($meta['title'] ?? '');
+		if ($title === '') {
+			return null;
+		}
+		$date = substr($meta['meeting_date'] ?? '', 0, 10);
+		$date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 ? $date . ' ' : '';
+		return $date . $title . ' — ' . $label . '.md';
+	}
+
+	/**
+	 * The scalar fields of a markdown file's YAML block.
+	 *
+	 * Enough YAML for what the analyser writes, not a parser: `key: value`,
+	 * quoted or not, and a long value folded onto indented lines — PyYAML wraps
+	 * at eighty columns, and a topic can be longer than that.
+	 *
+	 * @return array<string, string>
+	 */
+	public static function frontMatter(string $content): array {
+		if (!str_starts_with($content, "---\n")) {
+			return [];
+		}
+		$end = strpos($content, "\n---", 4);
+		if ($end === false) {
+			return [];
+		}
+		$fields = [];
+		$key = null;
+		foreach (explode("\n", substr($content, 4, $end - 4)) as $line) {
+			if (preg_match('/^([A-Za-z_]\w*):\s*(.*)$/u', $line, $m) === 1) {
+				$key = $m[1];
+				$fields[$key] = $m[2];
+			} elseif ($key !== null && preg_match('/^\s+(\S.*)$/u', $line, $m) === 1
+				&& !str_starts_with($m[1], '- ')) {
+				$fields[$key] .= ($fields[$key] === '' ? '' : ' ') . $m[1];
+			} else {
+				$key = null;
+			}
+		}
+		return array_map(static function (string $v): string {
+			$v = trim($v);
+			if (strlen($v) >= 2 && $v[0] === "'" && str_ends_with($v, "'")) {
+				return str_replace("''", "'", substr($v, 1, -1));
+			}
+			if (strlen($v) >= 2 && $v[0] === '"' && str_ends_with($v, '"')) {
+				return stripcslashes(substr($v, 1, -1));
+			}
+			return $v;
+		}, $fields);
+	}
+
+	/**
+	 * A topic made fit for a filename on any system the file may be saved to:
+	 * no separators or reserved characters, one line, and short enough that
+	 * Files does not cut it to nothing.
+	 */
+	private static function fileSafe(string $title): string {
+		// A separator stands between two words; the other reserved characters
+		// belong to the word they touch and simply go.
+		$title = preg_replace('/[\\\\\/:]+/u', ' ', $title) ?? '';
+		$title = preg_replace('/[*?"<>|\x00-\x1F]+/u', '', $title) ?? '';
+		$title = trim(preg_replace('/\s+/u', ' ', $title) ?? '', " .");
+		return mb_strlen($title) > 120 ? rtrim(mb_substr($title, 0, 120)) . '…' : $title;
 	}
 
 	/**
