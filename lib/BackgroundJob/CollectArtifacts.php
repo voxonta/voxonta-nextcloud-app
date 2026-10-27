@@ -43,6 +43,13 @@ class CollectArtifacts extends TimedJob {
 	 */
 	private const UNKNOWN_GRACE = 24 * 3600;
 
+	/**
+	 * The platforms whose meetings this app delivers, as MeetingContext.source
+	 * names them: Talk calls, and Telemost meetings launched from a Talk chat
+	 * (BotListener). "" is a meeting the gateway stored before it kept this.
+	 */
+	private const OWN_SOURCES = ['nc-talk', 'telemost', ''];
+
 	public function __construct(
 		ITimeFactory $time,
 		private PendingMeetings $pending,
@@ -106,10 +113,17 @@ class CollectArtifacts extends TimedJob {
 	 * adopted with the room the gateway recorded, so a forgotten meeting still
 	 * knows where its result belongs.
 	 *
+	 * Only meetings this app produces: its own Talk calls and the Telemost
+	 * meetings it sends a bot to from a Talk chat. The gateway key can be
+	 * shared with other integrations — Matrix is the next one — and until
+	 * 2026-10-27 this took whatever it found, which would have filed their
+	 * calls into Talk rooms. "" is a meeting stored before the gateway kept the
+	 * platform; those were all this app's.
+	 *
 	 * Silent when there is nothing to adopt, which is the normal case.
 	 */
 	private function adopt(): void {
-		$waiting = $this->gateway->undelivered();
+		$waiting = $this->gateway->undelivered(self::OWN_SOURCES);
 		if ($waiting === []) {
 			return;
 		}
@@ -119,6 +133,11 @@ class CollectArtifacts extends TimedJob {
 		foreach ($waiting as $meeting) {
 			if (isset($known[$meeting['session_id']])) {
 				continue;  // already being waited for, backoff and all
+			}
+			if (!in_array($meeting['source'] ?? '', self::OWN_SOURCES, true)) {
+				// The gateway was asked for these only; a row from another
+				// platform means it ignored the question. Not ours either way.
+				continue;
 			}
 			if ($meeting['room_token'] === '') {
 				// Nothing to publish into. Rare — the gateway records the room

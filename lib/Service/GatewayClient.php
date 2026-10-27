@@ -99,18 +99,28 @@ class GatewayClient {
 	 *
 	 * The gateway has always known, through its own acked flag. This is asking.
 	 *
-	 * @return array<int, array{session_id: string, room_token: string,
-	 *               room_name: string}> empty when nothing is waiting OR when
-	 *         the gateway cannot be reached: a sweep that fails is a sweep that
-	 *         runs again in an hour, not a reason to disturb anything.
+	 * @param array<int, string> $sources the platforms to ask about ("" = rows
+	 *        the gateway stored before it kept the platform); empty asks about
+	 *        all. A key can be shared by several integrations, each of which
+	 *        collects only its own. A gateway that predates the filter ignores
+	 *        it and sends no `source`, which reads as "".
+	 * @return array<int, array{session_id: string, source: string,
+	 *               room_token: string, room_name: string}> empty when nothing
+	 *         is waiting OR when the gateway cannot be reached: a sweep that
+	 *         fails is a sweep that runs again in an hour, not a reason to
+	 *         disturb anything.
 	 */
-	public function undelivered(): array {
+	public function undelivered(array $sources = []): array {
 		if (!$this->configured()) {
 			return [];
 		}
+		// Repeated rather than an array option: the client would encode one as
+		// source[0]=..., which the gateway does not read.
+		$query = implode('&', array_map(
+			static fn (string $source) => 'source=' . rawurlencode($source), $sources));
 		try {
 			$response = $this->clientService->newClient()->get(
-				$this->base() . '/v1/meetings/undelivered', [
+				$this->base() . '/v1/meetings/undelivered' . ($query === '' ? '' : '?' . $query), [
 					'headers' => ['Authorization' => 'Bearer ' . $this->token()],
 					'timeout' => self::TIMEOUT,
 				]);
@@ -134,6 +144,7 @@ class GatewayClient {
 			}
 			$out[] = [
 				'session_id' => $sessionId,
+				'source' => (string)($row['source'] ?? ''),
 				'room_token' => (string)($row['room_token'] ?? ''),
 				'room_name' => (string)($row['room_name'] ?? ''),
 			];
