@@ -93,7 +93,12 @@ room after the call.
 
 Either spelling works whatever language the room speaks. The command works
 before the call starts and while it is running, and stops recording for everyone
-in that call.
+in that call. It lasts until the call ends: the next call in the room is
+recorded again. While it is on, the transcription service sends nothing from the
+call; resuming continues the same meeting rather than starting a new one.
+
+It needs the transcription service 0.3.2 or later — older versions do not read
+the opt-out and keep recording.
 
 It reaches the app through the Talk bot, so it works in the conversations where
 the bot was set up (step 3 above) — in practice group and public rooms. A
