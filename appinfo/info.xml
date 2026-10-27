@@ -46,5 +46,6 @@ administrator sets in the admin settings and enters in the service as well.
 	<background-jobs>
 		<job>OCA\Voxonta\BackgroundJob\WarmHeaderCache</job>
 		<job>OCA\Voxonta\BackgroundJob\CollectArtifacts</job>
+		<job>OCA\Voxonta\BackgroundJob\SendDirectory</job>
 	</background-jobs>
 </info>

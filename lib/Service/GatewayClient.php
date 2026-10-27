@@ -47,10 +47,18 @@ class GatewayClient {
 	}
 
 	/**
-	 * What exists for a meeting so far.
+	 * What exists for a meeting so far, and who may see it.
+	 *
+	 * `access` is the gateway's answer to "which accounts of this archive were
+	 * in that meeting": the people the meeting's platform reported, matched to
+	 * the accounts directory() sent, by the rules the owner switched on. This
+	 * app does not know the platform or the rules — a Matrix id or a Telemost
+	 * name never reaches it, only logins. A gateway that keeps no people sends
+	 * none, which reads as an empty list.
 	 *
 	 * @return array{status: string, final: bool, detail: string,
-	 *               artifacts: array<int, array<string, mixed>>}|null
+	 *               artifacts: array<int, array<string, mixed>>,
+	 *               access: array<int, string>}|null
 	 *         null when the gateway cannot be reached or does not know it — both
 	 *         are "ask again later", never "this meeting produced nothing".
 	 */
@@ -85,6 +93,9 @@ class GatewayClient {
 			'final' => (bool)($body['final'] ?? false),
 			'detail' => (string)($body['detail'] ?? ''),
 			'artifacts' => is_array($body['artifacts'] ?? null) ? $body['artifacts'] : [],
+			'access' => array_values(array_filter(
+				is_array($body['access'] ?? null) ? $body['access'] : [],
+				static fn ($login) => is_string($login) && $login !== '')),
 		];
 	}
 
@@ -98,29 +109,21 @@ class GatewayClient {
 	 * their transcript never arrived.
 	 *
 	 * The gateway has always known, through its own acked flag. This is asking.
+	 * Every platform's meetings, whatever they came from: this app is the
+	 * archive, and other integrations keep receipts of their own.
 	 *
-	 * @param array<int, string> $sources the platforms to ask about ("" = rows
-	 *        the gateway stored before it kept the platform); empty asks about
-	 *        all. A key can be shared by several integrations, each of which
-	 *        collects only its own. A gateway that predates the filter ignores
-	 *        it and sends no `source`, which reads as "".
-	 * @return array<int, array{session_id: string, source: string,
-	 *               room_token: string, room_name: string}> empty when nothing
-	 *         is waiting OR when the gateway cannot be reached: a sweep that
-	 *         fails is a sweep that runs again in an hour, not a reason to
-	 *         disturb anything.
+	 * @return array<int, array{session_id: string, room_token: string,
+	 *               room_name: string}> empty when nothing is waiting OR when
+	 *         the gateway cannot be reached: a sweep that fails is a sweep that
+	 *         runs again in five minutes, not a reason to disturb anything.
 	 */
-	public function undelivered(array $sources = []): array {
+	public function undelivered(): array {
 		if (!$this->configured()) {
 			return [];
 		}
-		// Repeated rather than an array option: the client would encode one as
-		// source[0]=..., which the gateway does not read.
-		$query = implode('&', array_map(
-			static fn (string $source) => 'source=' . rawurlencode($source), $sources));
 		try {
 			$response = $this->clientService->newClient()->get(
-				$this->base() . '/v1/meetings/undelivered' . ($query === '' ? '' : '?' . $query), [
+				$this->base() . '/v1/meetings/undelivered', [
 					'headers' => ['Authorization' => 'Bearer ' . $this->token()],
 					'timeout' => self::TIMEOUT,
 				]);
@@ -144,12 +147,47 @@ class GatewayClient {
 			}
 			$out[] = [
 				'session_id' => $sessionId,
-				'source' => (string)($row['source'] ?? ''),
 				'room_token' => (string)($row['room_token'] ?? ''),
 				'room_name' => (string)($row['room_name'] ?? ''),
 			];
 		}
 		return $out;
+	}
+
+	/**
+	 * Send the gateway this installation's accounts, replacing what it had.
+	 *
+	 * The gateway answers access in logins, and it can only name a login it
+	 * has been told about: a Matrix id matches an account by its login, a
+	 * Telemost guest by full name or address, and all three come from here.
+	 * Nothing is sent but what that takes.
+	 *
+	 * @param array<int, array{login: string, name: string, email: string}> $accounts
+	 * @return bool whether the gateway took it; false is logged and retried on
+	 *              the next run, and meanwhile the previous list stands
+	 */
+	public function directory(array $accounts): bool {
+		if (!$this->configured()) {
+			return false;
+		}
+		try {
+			$this->clientService->newClient()->put($this->base() . '/v1/directory', [
+				'headers' => [
+					'Authorization' => 'Bearer ' . $this->token(),
+					'Content-Type' => 'application/json',
+				],
+				'body' => json_encode(['accounts' => array_values($accounts)]),
+				'timeout' => self::TIMEOUT,
+			]);
+		} catch (\Throwable $e) {
+			// A gateway that predates the route, or one that keeps no people,
+			// answers 404 or 409. Sharing then falls back to who was in the
+			// Talk conversation, which is what it always did.
+			$this->logger->info('could not send the accounts directory: {message}',
+				['message' => $e->getMessage()]);
+			return false;
+		}
+		return true;
 	}
 
 	/**

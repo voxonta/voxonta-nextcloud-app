@@ -67,6 +67,15 @@ class ChatAnnouncer {
 		if ($token === '' || $links === []) {
 			return Announcement::Impossible;
 		}
+		if ($this->participants->isRoom($token) === false) {
+			// A meeting held somewhere other than Talk: its files are in the
+			// archive and shared, and there is no conversation here to tell.
+			// Trying would answer 404 and read as a failure worth retrying,
+			// which would keep the meeting open for a fortnight.
+			$this->logger->debug('{token} is not a Talk conversation — nothing announced',
+				['token' => $token]);
+			return Announcement::Impossible;
+		}
 		$credentials = $this->botAccount->credentials();
 		if ($credentials === null) {
 			$this->logger->warning('no bot account — cannot announce {token}',
