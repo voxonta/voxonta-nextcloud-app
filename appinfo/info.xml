@@ -19,7 +19,7 @@ Nextcloud. It reads its settings from here — whether to transcribe, which
 conversations, how long to keep the results — using an access key the
 administrator sets in the admin settings and enters in the service as well.
     ]]></description>
-    <version>3.0.9</version>
+    <version>3.1.0</version>
     <licence>agpl</licence>
     <author>Done</author>
     <namespace>Voxonta</namespace>
@@ -42,6 +42,12 @@ administrator sets in the admin settings and enters in the service as well.
 	<settings>
 		<admin>OCA\Voxonta\Settings\ServiceStatus</admin>
 	</settings>
+
+	<repair-steps>
+		<post-migration>
+			<step>OCA\Voxonta\Migration\KeepSharingMeetingsFromElsewhere</step>
+		</post-migration>
+	</repair-steps>
 
 	<background-jobs>
 		<job>OCA\Voxonta\BackgroundJob\WarmHeaderCache</job>

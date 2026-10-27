@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace OCA\Voxonta\BackgroundJob;
 
+use OCA\Voxonta\AppInfo\Application;
 use OCA\Voxonta\Service\GatewayClient;
+use OCA\Voxonta\Settings\AdminSettings;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
+use OCP\IAppConfig;
 use OCP\IUser;
 use OCP\IUserManager;
 use Psr\Log\LoggerInterface;
@@ -25,12 +28,16 @@ use Psr\Log\LoggerInterface;
  * after this runs, and an account switched off stops receiving shares within
  * the hour. Only enabled accounts are sent, so a person who has left is not a
  * match for the next person with their name.
+ *
+ * Only where the administrator allows it (AdminSettings::KEY_SEND_DIRECTORY):
+ * these are personal data leaving Nextcloud. Off on a new installation.
  */
 class SendDirectory extends TimedJob {
 	public function __construct(
 		ITimeFactory $time,
 		private GatewayClient $gateway,
 		private IUserManager $users,
+		private IAppConfig $appConfig,
 		private LoggerInterface $logger,
 	) {
 		parent::__construct($time);
@@ -39,7 +46,8 @@ class SendDirectory extends TimedJob {
 	}
 
 	protected function run($argument): void {
-		if (!$this->gateway->configured()) {
+		if (!$this->gateway->configured() || !$this->appConfig->getValueBool(
+				Application::APP_ID, AdminSettings::KEY_SEND_DIRECTORY, false)) {
 			return;
 		}
 
