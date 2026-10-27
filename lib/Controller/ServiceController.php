@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\Voxonta\Controller;
 
 use OCA\Voxonta\Service\ActiveCalls;
+use OCA\Voxonta\Service\RecordingState;
 use OCA\Voxonta\Service\ServiceConfig;
 use OCA\Voxonta\Service\TalkParticipants;
 use OCP\AppFramework\Controller;
@@ -31,6 +32,7 @@ class ServiceController extends Controller {
 		private ServiceConfig $config,
 		private ActiveCalls $calls,
 		private TalkParticipants $participants,
+		private RecordingState $recording,
 		private LoggerInterface $logger,
 	) {
 		parent::__construct($appName, $request);
@@ -68,6 +70,11 @@ class ServiceController extends Controller {
 		$calls = $this->calls->current();
 		foreach ($calls as &$call) {
 			$call['active_participants'] = $this->participants->countInCall($call['token']);
+			// "/no-record" reaches the capture service here and only here. The
+			// call stays listed while it is off, so the service keeps its place
+			// in the meeting and "/record" resumes the same one instead of
+			// starting a second.
+			$call['recording'] = $this->recording->isRecording($call['token']);
 		}
 		unset($call);
 		return new JSONResponse(['calls' => $calls]);

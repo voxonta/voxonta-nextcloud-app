@@ -6,6 +6,7 @@ namespace OCA\Voxonta\Listener;
 
 use OCA\Voxonta\Service\ActiveCalls;
 use OCA\Voxonta\Service\PendingMeetings;
+use OCA\Voxonta\Service\RecordingState;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use Psr\Log\LoggerInterface;
@@ -28,6 +29,7 @@ class CallListener implements IEventListener {
 	public function __construct(
 		private ActiveCalls $calls,
 		private PendingMeetings $pending,
+		private RecordingState $recording,
 		private LoggerInterface $logger,
 	) {
 	}
@@ -44,6 +46,11 @@ class CallListener implements IEventListener {
 			// may not have been written back yet.
 			$ended = str_contains($event::class, 'CallEnded');
 			if ($ended) {
+				// "/no-record" promises "in this call", so it ends with it; the
+				// next call in the room is recorded again. Cleared even for a
+				// call we never saw start — the promise was about the call, not
+				// about our bookkeeping of it.
+				$this->recording->setRecording($room->getToken(), true);
 				$call = $this->calls->ended($room->getToken());
 				if ($call !== null) {
 					// Its audio is already with the gateway; from here on the
