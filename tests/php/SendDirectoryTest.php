@@ -7,6 +7,7 @@ namespace OCA\Voxonta\Tests;
 use OCA\Voxonta\BackgroundJob\SendDirectory;
 use OCA\Voxonta\Service\GatewayClient;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\IAppConfig;
 use OCP\IUser;
 use OCP\IUserManager;
 use PHPUnit\Framework\TestCase;
@@ -32,7 +33,7 @@ class SendDirectoryTest extends TestCase {
 	}
 
 	/** @param array<int, IUser> $users */
-	private function sendFor(array $users, bool $configured = true): void {
+	private function sendFor(array $users, bool $configured = true, bool $allowed = true): void {
 		$gateway = $this->createMock(GatewayClient::class);
 		$gateway->method('configured')->willReturn($configured);
 		$gateway->method('directory')->willReturnCallback(function (array $accounts): bool {
@@ -47,8 +48,12 @@ class SendDirectoryTest extends TestCase {
 				}
 			});
 
+		$appConfig = $this->createMock(IAppConfig::class);
+		$appConfig->method('getValueBool')->willReturnCallback(
+			static fn (string $app, string $key, bool $default) => $allowed);
+
 		$job = new SendDirectory($this->createMock(ITimeFactory::class), $gateway, $manager,
-			$this->createMock(LoggerInterface::class));
+			$appConfig, $this->createMock(LoggerInterface::class));
 		(new \ReflectionMethod($job, 'run'))->invoke($job, null);
 	}
 
@@ -75,6 +80,12 @@ class SendDirectoryTest extends TestCase {
 
 	public function testNothingIsSentWithoutAGateway(): void {
 		$this->sendFor([$this->user('vadim.k', 'V', null)], configured: false);
+
+		$this->assertSame([], $this->sent);
+	}
+
+	public function testNothingIsSentUnlessTheAdministratorAllowsIt(): void {
+		$this->sendFor([$this->user('vadim.k', 'V', null)], allowed: false);
 
 		$this->assertSame([], $this->sent);
 	}

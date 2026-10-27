@@ -118,11 +118,14 @@ answers, so a ringing call is never recorded.
 - Audio is used to produce the transcript and is not kept afterwards.
 - Transcripts are stored in Nextcloud and shared with the call participants.
 - To share a meeting held outside Talk (Element, Telemost) with the right
-  people, the service needs to know which accounts exist here. Once an hour the
-  app sends it the login, display name and email address of every enabled
-  account — nothing else. Which of them may be matched to a meeting's people,
-  and how, is set per installation by the service operator on the owner's word;
-  by default nobody is matched.
+  people, the service needs to know which accounts exist here. With **Share
+  meetings held outside Talk** switched on, the app sends it the login, display
+  name and email address of every enabled account once an hour — nothing else.
+  The setting is off on a new installation, and switched on when upgrading an
+  installation from a version before 3.1.0, whose owner relied on it. Which
+  accounts may be matched to a meeting's people, and how, is set per
+  installation by the service operator on the owner's word; by default nobody
+  is matched.
 - The opt-out command applies to the entire call, for every participant.
 - Whether transcription and analysis run on your own infrastructure or on a
   hosted backend depends on how your administrator configured it. For the hosted

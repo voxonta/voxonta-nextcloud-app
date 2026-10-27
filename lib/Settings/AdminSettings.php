@@ -41,6 +41,11 @@ class AdminSettings implements IDeclarativeSettingsForm {
 	// the bot into the meeting.
 	public const KEY_TELEMOST_URL = 'telemost_url';
 	public const KEY_TELEMOST_TOKEN = 'telemost_token';
+	// Whether the accounts of this installation are sent to the gateway, so
+	// that meetings held outside Talk can be shared with the right people.
+	// Off for a new installation; on for one that was running before 3.1.0
+	// (see Migration\KeepSharingMeetingsFromElsewhere).
+	public const KEY_SEND_DIRECTORY = 'send_directory';
 
 	/** What the folders are called unless an administrator says otherwise. */
 	public const DEFAULT_ANALYSIS_FOLDER = 'Аналитика встреч';
@@ -84,6 +89,13 @@ class AdminSettings implements IDeclarativeSettingsForm {
 					'description' => $this->l('When a call ends, share the transcript as a file card in the room. Turn off to keep transcripts in the archive only.'),
 					'type' => DeclarativeSettingsTypes::CHECKBOX,
 					'default' => true,
+				],
+				[
+					'id' => self::KEY_SEND_DIRECTORY,
+					'title' => $this->l('Share meetings held outside Talk'),
+					'description' => $this->l('Meetings from Element or Telemost are shared with the people who took part. To find their accounts, the service receives the login, display name and email address of every enabled account, once an hour.'),
+					'type' => DeclarativeSettingsTypes::CHECKBOX,
+					'default' => false,
 				],
 				[
 					'id' => self::KEY_SERVICE_TOKEN,

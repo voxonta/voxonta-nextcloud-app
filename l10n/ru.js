@@ -21,6 +21,8 @@ OC.L10N.register(
     "Turn transcription off without uninstalling the app. Calls already running are not interrupted.": "Выключить расшифровку, не удаляя приложение. Уже идущие звонки не прерываются.",
     "Limit to these conversations": "Только эти беседы",
     "Comma-separated conversation tokens. Leave empty to transcribe every call. Useful for a pilot: switch it on for one team before rolling it out.": "Токены бесед через запятую. Пусто — расшифровывать все звонки. Удобно для пилота: включить одной команде до общего запуска.",
+    "Share meetings held outside Talk": "Раздавать встречи не из Talk",
+    "Meetings from Element or Telemost are shared with the people who took part. To find their accounts, the service receives the login, display name and email address of every enabled account, once an hour.": "Встречи из Element или Телемоста раздаются их участникам. Чтобы найти их учётные записи, сервис раз в час получает логин, имя и адрес почты каждой включённой учётной записи.",
     "Post the transcript to the conversation": "Публиковать расшифровку в беседе",
     "When a call ends, share the transcript as a file card in the room. Turn off to keep transcripts in the archive only.": "По окончании звонка выложить расшифровку файлом в беседе. Выключите, чтобы расшифровки оставались только в архиве.",
     "Recording resumed for this call.": "Запись этого звонка возобновлена.",
