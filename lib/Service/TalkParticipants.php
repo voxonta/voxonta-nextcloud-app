@@ -84,6 +84,35 @@ class TalkParticipants {
 	}
 
 	/**
+	 * Whether Talk has a conversation by this token. Null when it cannot be
+	 * told — Talk absent, or any trouble other than "no such room".
+	 *
+	 * The archive takes meetings from every platform the gateway serves, and
+	 * only some of them happened in a Talk conversation. A room id from
+	 * anywhere else is simply not one here, and that is an answer: there is
+	 * no chat to announce into, today or on any later tick.
+	 */
+	public function isRoom(string $token): ?bool {
+		if ($token === '') {
+			return false;
+		}
+		if (!class_exists('\OCA\Talk\Manager')) {
+			return null;
+		}
+		try {
+			Server::get(\OCA\Talk\Manager::class)->getRoomByToken($token);
+			return true;
+		} catch (\OCA\Talk\Exceptions\RoomNotFoundException) {
+			return false;
+		} catch (\Throwable $e) {
+			$this->logger->debug('could not look up {token}: {msg}', [
+				'token' => $token, 'msg' => $e->getMessage(),
+			]);
+			return null;
+		}
+	}
+
+	/**
 	 * The user ids of everyone in a room, for sharing a meeting's files with
 	 * them. Guests have no id and are skipped: there is nobody to share with.
 	 *

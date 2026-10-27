@@ -29,6 +29,10 @@ class CollectArtifactsTest extends TestCase {
 	private PendingMeetings&MockObject $pending;
 	private GatewayClient&MockObject $gateway;
 	private Announcement $announcement = Announcement::Posted;
+	/** @var array<int, string> who Talk says is in the conversation */
+	private array $members = [];
+	/** @var array<int, array<int, string>> the participants each write shared with */
+	private array $sharedWith = [];
 
 	/**
 	 * @param array<int, array<string, string>> $waiting what the gateway says is
@@ -49,9 +53,17 @@ class CollectArtifactsTest extends TestCase {
 		$writer = $this->createMock(ArtifactWriter::class);
 		$writer->method('publishesToChat')->willReturn(true);
 		$writer->method('linkTo')->willReturn('https://cloud.example/f/1');
+		$writer->method('write')->willReturnCallback(
+			function (array $meta, string $content, array $participants): bool {
+				$this->sharedWith[] = $participants;
+				return true;
+			});
 
 		$announcer = $this->createMock(ChatAnnouncer::class);
 		$announcer->method('announce')->willReturnCallback(fn () => $this->announcement);
+
+		$participants = $this->createMock(TalkParticipants::class);
+		$participants->method('userIds')->willReturnCallback(fn () => $this->members);
 
 		return new CollectArtifacts(
 			$time,
@@ -59,7 +71,7 @@ class CollectArtifactsTest extends TestCase {
 			$this->gateway,
 			$writer,
 			$announcer,
-			$this->createMock(TalkParticipants::class),
+			$participants,
 			$this->createMock(IL10N::class),
 			$this->createMock(LoggerInterface::class),
 		);
@@ -228,16 +240,62 @@ class CollectArtifactsTest extends TestCase {
 		$this->collectRound($job);
 	}
 
-	public function testFilesWithNoRoomAreLeftWhereTheyAre(): void {
-		// Publishing needs somewhere to publish to, and guessing a room is
-		// worse than saying nothing.
+	public function testAMeetingWithNoRoomIsStillArchived(): void {
+		// Until 2026-10-28 these were left at the gateway: publishing needed a
+		// room. The archive does not — the files are shared with whoever the
+		// gateway says was there, and only the announcement needs a room.
 		$job = $this->job([[
 			'session_id' => 'no-room', 'room_token' => '', 'room_name' => '',
 		]]);
 		$this->pending->method('due')->willReturn([]);
 
-		$this->pending->expects($this->never())->method('add');
+		$this->pending->expects($this->once())->method('add')
+			->with($this->callback(fn (array $call) => $call['session_id'] === 'no-room'
+				&& $call['token'] === ''));
 
 		$this->collectRound($job);
+	}
+
+	public function testSharedWithThePeopleTheGatewayNamesAndTheConversation(): void {
+		// The gateway's list depends on rules the owner may not have switched
+		// on; the conversation is who a Talk call was always shared with. A
+		// meeting must reach everyone either one names, and each of them once.
+		$this->members = ['olga.s', 'vadim.k'];
+		$job = $this->job();
+		$this->pending->method('due')->willReturn($this->queued());
+		$this->gateway->method('meeting')->willReturn([
+			'status' => 'complete', 'final' => true, 'detail' => '',
+			'artifacts' => [['name' => '01_Executive_Summary.md', 'kind' => 'summary',
+				'sha256' => str_repeat('a', 64)]],
+			'access' => ['olga.s', 'ivan.p'],
+		]);
+		$this->gateway->method('artifact')->willReturn('# summary');
+
+		$this->collectRound($job);
+
+		$this->assertCount(1, $this->sharedWith);
+		$people = $this->sharedWith[0];
+		sort($people);
+		$this->assertSame(['ivan.p', 'olga.s', 'vadim.k'], $people);
+		$this->assertSame(array_values($this->sharedWith[0]), $this->sharedWith[0],
+			'a list, not a map with holes');
+	}
+
+	public function testAMeetingFromElsewhereIsSharedByTheGatewaysWordAlone(): void {
+		// A Matrix room is no Talk conversation: Talk names nobody, and the
+		// people the gateway matched are the whole audience.
+		$job = $this->job();
+		$this->pending->method('due')->willReturn($this->queued(['token' => '!r:example.org']));
+		$this->gateway->method('meeting')->willReturn([
+			'status' => 'complete', 'final' => false, 'detail' => '',
+			'artifacts' => [['name' => 't.md', 'kind' => 'transcript',
+				'sha256' => str_repeat('b', 64)]],
+			'access' => ['vadim.k'],
+		]);
+		$this->gateway->method('artifact')->willReturn('text');
+
+		$this->collectRound($job);
+
+		$this->assertSame([['vadim.k']], $this->sharedWith);
 	}
 }

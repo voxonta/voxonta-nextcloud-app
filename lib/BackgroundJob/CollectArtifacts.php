@@ -43,13 +43,6 @@ class CollectArtifacts extends TimedJob {
 	 */
 	private const UNKNOWN_GRACE = 24 * 3600;
 
-	/**
-	 * The platforms whose meetings this app delivers, as MeetingContext.source
-	 * names them: Talk calls, and Telemost meetings launched from a Talk chat
-	 * (BotListener). "" is a meeting the gateway stored before it kept this.
-	 */
-	private const OWN_SOURCES = ['nc-talk', 'telemost', ''];
-
 	public function __construct(
 		ITimeFactory $time,
 		private PendingMeetings $pending,
@@ -99,31 +92,33 @@ class CollectArtifacts extends TimedJob {
 	}
 
 	/**
-	 * Take back meetings the gateway is holding files for and this app forgot.
+	 * Take in meetings the gateway is holding files for and this app does not
+	 * know.
 	 *
-	 * The queue here is a memory, and it can be lost: a status read as final, a
-	 * wiped config, a reinstall. Until 2026-08-17 every such loss was permanent
-	 * — the files sat in the gateway until retention deleted them, and the only
-	 * way anyone found out was a person asking why their transcript never
-	 * arrived. Eight meetings were recovered by hand that day, the oldest a
-	 * fortnight old.
+	 * Two kinds arrive here. A Talk call was queued when it ended, and is here
+	 * only when that queue lost it: a status read as final, a wiped config, a
+	 * reinstall. Until 2026-08-17 every such loss was permanent — the files sat
+	 * in the gateway until retention deleted them, and the only way anyone
+	 * found out was a person asking why their transcript never arrived. Eight
+	 * meetings were recovered by hand that day, the oldest a fortnight old.
 	 *
-	 * The gateway has always known, through the acked flag on every artifact.
-	 * Asking it makes that the authority instead of this list. A meeting is
-	 * adopted with the room the gateway recorded, so a forgotten meeting still
-	 * knows where its result belongs.
+	 * Every other meeting — Element, Telemost, whatever the gateway serves next
+	 * — is never queued at all, and this is how it reaches the archive. Which
+	 * platform it came from is not this app's business: the gateway says who
+	 * may see it (meeting()'s `access`), and other integrations keep receipts
+	 * of their own, so taking a meeting here takes nothing from them. Until
+	 * 2026-10-28 this took only Talk and Telemost, and Element calls were
+	 * published into their Matrix room and nowhere else.
 	 *
-	 * Only meetings this app produces: its own Talk calls and the Telemost
-	 * meetings it sends a bot to from a Talk chat. The gateway key can be
-	 * shared with other integrations — Matrix is the next one — and until
-	 * 2026-10-27 this took whatever it found, which would have filed their
-	 * calls into Talk rooms. "" is a meeting stored before the gateway kept the
-	 * platform; those were all this app's.
+	 * A meeting is taken with the room the gateway recorded. That may be a
+	 * Talk conversation, a room on another platform, or nothing at all; the
+	 * files are archived and shared either way, and only a Talk conversation
+	 * is told about them (ChatAnnouncer).
 	 *
 	 * Silent when there is nothing to adopt, which is the normal case.
 	 */
 	private function adopt(): void {
-		$waiting = $this->gateway->undelivered(self::OWN_SOURCES);
+		$waiting = $this->gateway->undelivered();
 		if ($waiting === []) {
 			return;
 		}
@@ -133,20 +128,6 @@ class CollectArtifacts extends TimedJob {
 		foreach ($waiting as $meeting) {
 			if (isset($known[$meeting['session_id']])) {
 				continue;  // already being waited for, backoff and all
-			}
-			if (!in_array($meeting['source'] ?? '', self::OWN_SOURCES, true)) {
-				// The gateway was asked for these only; a row from another
-				// platform means it ignored the question. Not ours either way.
-				continue;
-			}
-			if ($meeting['room_token'] === '') {
-				// Nothing to publish into. Rare — the gateway records the room
-				// with the first frame — but guessing a room is worse than
-				// saying so and leaving the files where they are.
-				$this->logger->warning(
-					'the gateway holds files for {session} but recorded no room',
-					['session' => $meeting['session_id']]);
-				continue;
 			}
 			$this->pending->add([
 				'session_id' => $meeting['session_id'],
@@ -158,8 +139,8 @@ class CollectArtifacts extends TimedJob {
 		}
 
 		if ($adopted > 0) {
-			$this->logger->warning(
-				'took back {count} meeting(s) the gateway still had files for',
+			$this->logger->info(
+				'took in {count} meeting(s) the gateway had files for',
 				['count' => $adopted]);
 		}
 	}
@@ -189,7 +170,8 @@ class CollectArtifacts extends TimedJob {
 		}
 
 		$held = $meeting['written'] ?? [];
-		$participants = $this->participantsOf((string)($meeting['token'] ?? ''));
+		$participants = $this->audience($state['access'] ?? [],
+			(string)($meeting['token'] ?? ''));
 		$written = [];
 
 		foreach ($state['artifacts'] as $artifact) {
@@ -299,12 +281,26 @@ class CollectArtifacts extends TimedJob {
 	}
 
 	/**
-	 * Who to share with. An empty list is fine — the files are written either
-	 * way, and a share that could not be worked out is not worth losing them
-	 * over.
+	 * Who to share with: the accounts the gateway says were in the meeting,
+	 * and, for a Talk call, everyone in its conversation as before.
 	 *
+	 * The conversation is kept rather than replaced. It is who this app has
+	 * always shared with, and the gateway's list depends on rules the owner
+	 * may not have switched on — a meeting must not reach fewer people than it
+	 * did before just because nobody told the gateway how to match them.
+	 *
+	 * An empty list is fine — the files are written either way, and a share
+	 * that could not be worked out is not worth losing them over.
+	 *
+	 * @param array<int, string> $access logins from the gateway
 	 * @return array<int, string>
 	 */
+	private function audience(array $access, string $token): array {
+		return array_values(array_unique(array_merge(
+			$access, $this->participantsOf($token))));
+	}
+
+	/** @return array<int, string> */
 	private function participantsOf(string $token): array {
 		if ($token === '') {
 			return [];

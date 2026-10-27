@@ -117,6 +117,12 @@ answers, so a ringing call is never recorded.
 
 - Audio is used to produce the transcript and is not kept afterwards.
 - Transcripts are stored in Nextcloud and shared with the call participants.
+- To share a meeting held outside Talk (Element, Telemost) with the right
+  people, the service needs to know which accounts exist here. Once an hour the
+  app sends it the login, display name and email address of every enabled
+  account — nothing else. Which of them may be matched to a meeting's people,
+  and how, is set per installation by the service operator on the owner's word;
+  by default nobody is matched.
 - The opt-out command applies to the entire call, for every participant.
 - Whether transcription and analysis run on your own infrastructure or on a
   hosted backend depends on how your administrator configured it. For the hosted
@@ -139,12 +145,22 @@ this app, which scopes the answer to the person asking: the service isolates by
 tenant, not by user, and only Nextcloud knows who is on the other end of the
 request.
 
+The app is the archive for every meeting the service holds, wherever it took
+place — a Talk call, an Element call, a Telemost meeting. It does not need to
+know which: the service says who may see each meeting, as logins of this
+installation, and the app shares the summary and transcript with them. For a
+Talk call everyone in the conversation is added, as before. Other integrations
+(the Matrix one, for instance) keep their own record of what they have
+collected, so the archive taking a meeting takes nothing from them.
+
 When a meeting is written up, the app posts the links into the conversation —
 but only where the bot is a member. It never is in a one-to-one room: those
 hold exactly two people, and the bot hears the call through the signalling
 server rather than as a participant. Nobody is left uninformed either way,
 because the summary and the transcript are shared with each participant
-personally, which is what a one-to-one call has always relied on.
+personally, which is what a one-to-one call has always relied on. A meeting
+whose room is not a Talk conversation — an Element call, say — is shared the
+same way and not announced here at all.
 
 Finished meetings are collected by a background job, a few per cron tick. A
 meeting whose files cannot be fetched is asked about again later, and later

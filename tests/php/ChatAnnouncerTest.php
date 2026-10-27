@@ -32,6 +32,8 @@ class ChatAnnouncerTest extends TestCase {
 	private array $warnings = [];
 	/** Whether Talk says this is a room nobody can be added to; null = unknown. */
 	private ?bool $closedRoom = null;
+	/** Whether Talk has a conversation by the token; null = cannot tell. */
+	private ?bool $talkRoom = null;
 	private bool $postThrows = false;
 
 	private function announcer(): ChatAnnouncer {
@@ -52,6 +54,7 @@ class ChatAnnouncerTest extends TestCase {
 		$participants = $this->createMock(TalkParticipants::class);
 		$participants->method('userIds')->willReturnCallback(fn () => $this->members);
 		$participants->method('isClosedRoom')->willReturnCallback(fn () => $this->closedRoom);
+		$participants->method('isRoom')->willReturnCallback(fn () => $this->talkRoom);
 
 		$urls = $this->createMock(IURLGenerator::class);
 		$urls->method('getAbsoluteURL')->willReturnCallback(
@@ -131,5 +134,17 @@ class ChatAnnouncerTest extends TestCase {
 
 		$this->assertSame(Announcement::Failed,
 			$this->announcer()->announce('room', self::LINKS));
+	}
+
+	public function testARoomFromAnotherPlatformIsNotAnnouncedInto(): void {
+		// The archive takes meetings from every platform, and a Matrix room id
+		// is not a Talk conversation. Posting there answered 404, which reads
+		// as Failed — and Failed keeps the meeting open for a fortnight.
+		$this->talkRoom = false;
+
+		$this->assertSame(Announcement::Impossible,
+			$this->announcer()->announce('!room:example.org', self::LINKS));
+		$this->assertSame([], $this->posted);
+		$this->assertSame([], $this->warnings, 'nothing anyone could fix');
 	}
 }
