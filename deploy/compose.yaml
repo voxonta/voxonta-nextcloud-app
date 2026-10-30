@@ -1,0 +1,14 @@
+name: voxonta-nextcloud
+services:
+  capture:
+    build: ./capture
+    environment:
+      APP_BASE_URL: ${NEXTCLOUD_URL:?Set NEXTCLOUD_URL}
+      NEXTCLOUD_URL: ${NEXTCLOUD_URL:?Set NEXTCLOUD_URL}
+      APP_SERVICE_TOKEN: ${SERVICE_TOKEN:?Set SERVICE_TOKEN}
+      GATEWAY_TARGET: ${GATEWAY_TARGET:?Set GATEWAY_TARGET}
+      GATEWAY_TLS: 'true'
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:?Set GATEWAY_TOKEN}
+      POLL_INTERVAL: '1'
+      TIMEZONE: ${TIMEZONE:-UTC}
+    restart: unless-stopped

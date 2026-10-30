@@ -25,6 +25,25 @@ jobs:
           node-version: '22'
       - run: ./build-release.sh
 
+      - name: Read pinned capture source
+        run: echo "CAPTURE_REF=$(cat deploy/capture.ref)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: voxonta/nextcloud-talk-capture
+          ref: ${{ env.CAPTURE_REF }}
+          path: .capture-source
+      - name: Build independent Nextcloud package
+        run: |
+          python3 scripts/build_bundle.py --capture-source .capture-source --app-archive "$(find build -maxdepth 1 -name 'voxonta-*.tar.gz' -print -quit)"
+          mkdir /tmp/voxonta-nextcloud-install
+          tar -xzf dist/voxonta-nextcloud-*.tar.gz -C /tmp/voxonta-nextcloud-install
+          python3 scripts/check_bundle.py /tmp/voxonta-nextcloud-install/voxonta-nextcloud
+          docker build -t voxonta-nextcloud-capture:ci /tmp/voxonta-nextcloud-install/voxonta-nextcloud/capture
+          docker run --rm --entrypoint python voxonta-nextcloud-capture:ci -c "import runpy, importlib.util; assert importlib.util.find_spec('livekit') is None; runpy.run_path('/app/src/main.py', run_name='package_test')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxonta-nextcloud-installation
+          path: dist/*
       - uses: actions/upload-artifact@v4
         with:
           name: done_transcription
@@ -42,8 +61,19 @@ jobs:
         with:
           node-version: '22'
       - run: ./build-release.sh
+      - name: Read pinned capture source
+        run: echo "CAPTURE_REF=$(cat deploy/capture.ref)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: voxonta/nextcloud-talk-capture
+          ref: ${{ env.CAPTURE_REF }}
+          path: .capture-source
+      - name: Build independent Nextcloud package
+        run: python3 scripts/build_bundle.py --capture-source .capture-source --app-archive "$(find build -maxdepth 1 -name 'voxonta-*.tar.gz' -print -quit)"
       # Administrators install this file directly; the Appstore, when we get
       # there, reads the same archive.
       - uses: softprops/action-gh-release@v2
         with:
-          files: build/*.tar.gz
+          files: |
+            build/*.tar.gz
+            dist/*
