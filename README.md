@@ -212,3 +212,17 @@ https://github.com/voxonta/voxonta-nextcloud-app/issues
 ## Licence
 
 AGPL-3.0-or-later.
+
+## Единый установочный пакет Nextcloud
+
+Архив `voxonta-nextcloud-<commit>.tar.gz` содержит приложение `voxonta-app.tar.gz`
+и собственный настроенный захват Talk. Достаточно этого комплекта и существующего
+Nextcloud Talk; Matrix/Synapse/Element и отдельный пакет Matrix не требуются.
+Инструкция и пример `.env` находятся внутри. Запуск захвата —
+`docker compose up -d --build`; приложение устанавливается в ваш Nextcloud.
+
+Для сборки сопровождающим: сначала `./build-release.sh`, затем
+`python3 scripts/build_bundle.py --capture-source <capture-checkout> --app-archive build/voxonta-<version>.tar.gz`.
+Исходники захвата включаются по фиксированному commit из `deploy/capture.ref`.
+Сборка использует только закоммиченные исходники интеграции; локальные секреты
+не попадают в пакет. CI прикладывает весь комплект отдельным artifact и к релизу.

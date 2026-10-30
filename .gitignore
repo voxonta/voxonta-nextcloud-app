@@ -4,3 +4,7 @@ js/
 tests/php/.phpunit.cache/
 __pycache__/
 build/
+
+dist/
+
+.capture-source/
