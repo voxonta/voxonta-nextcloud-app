@@ -39,6 +39,7 @@ jobs:
           tar -xzf dist/voxonta-nextcloud-*.tar.gz -C /tmp/voxonta-nextcloud-install
           python3 scripts/check_bundle.py /tmp/voxonta-nextcloud-install/voxonta-nextcloud
           docker build -t voxonta-nextcloud-capture:ci /tmp/voxonta-nextcloud-install/voxonta-nextcloud/capture
+          docker run --rm --entrypoint python voxonta-nextcloud-capture:ci -c "import runpy, importlib.util; assert importlib.util.find_spec('livekit') is None; runpy.run_path('/app/src/main.py', run_name='package_test')"
       - uses: actions/upload-artifact@v4
         with:
           name: voxonta-nextcloud-installation
